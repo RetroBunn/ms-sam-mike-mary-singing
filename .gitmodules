@@ -1,5 +1,4 @@
 [submodule "engine"]
 	path = engine
 	url = https://github.com/KamiKitsune420/ms-sam-mike-mary-decomp.git
-	branch = master
-	branch = master
+	branch = main
