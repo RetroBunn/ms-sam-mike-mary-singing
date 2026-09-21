@@ -1,17 +1,31 @@
-VocalWriter Studio -- getting started
+Whistler Studio -- getting started
+
+Singing with Microsoft Sam, Mike and Mary, note by note.
 
 Running it
 
-Windows. Unzip the folder anywhere and run VocalWriterStudio.exe inside
-it. Keep the folder together. The first time, SmartScreen will stop it:
-choose "More info", then "Run anyway".
+Windows. Unzip the folder anywhere and run WhistlerStudio.exe inside it.
+Keep the folder together. The first time, SmartScreen will stop it: choose
+"More info", then "Run anyway".
 
-macOS. Unzip and put VocalWriter Studio.app where you want it. Before it
-will open, run this in Terminal:
+macOS. Unzip and put Whistler Studio.app where you want it. Before it will
+open, run this in Terminal:
 
-    xattr -c "/Applications/VocalWriter Studio.app"
+    xattr -c "/Applications/Whistler Studio.app"
 
-Nothing else to install.
+The voices
+
+Sam, Mike and Mary are Microsoft's, and their files are not part of this
+program. They come with Windows XP and with the SAPI 5.1 voices:
+
+    Sam.spd and Sam.sdf      Sam (and the same two files for Mike and Mary)
+    LTTS1033.LXA             the dictionary
+    r1033tts.LXA             the letter-to-sound rules
+
+If Windows has them installed, they are found without asking. If not, the
+program says what is missing and asks for the folder they are in, and
+remembers it. You can also put them in a folder called voices beside the
+program.
 
 Making a sound
 
@@ -21,12 +35,13 @@ them, and F6 jumps between the two lists.
 
 You start with one empty track. To put something in it:
 
-1. Press Ctrl+W. Type daisy and press Enter.
+1. Press Ctrl+W. Type daisy and press Enter to look it up, then Enter again
+   to add it.
 2. Press Ctrl+P to play.
 
-That is a word sung on one note. To spread it over two notes, put a hyphen
-where it should divide -- dai-sy -- and set "Notes to use" to 2 in the same
-dialog.
+Sam's dictionary divides a word into syllables, so daisy goes on two notes,
+dai and sy. To sing a word on fewer notes, change "Notes to use" in the same
+dialog. A hyphen in what you type -- dai-sy -- also says where it divides.
 
 Add more words the same way. Each one goes in after the note you are on, so
 arrow down to the end first if you want it there.
@@ -42,7 +57,10 @@ Move to a note with the arrow keys. Then:
 - Enter opens it: the phonemes, the pitch, the length, and the pitch bend.
 - Delete removes it.
 
-Pitches can be typed as names -- C4, F#3, Bb5 -- or as numbers.
+Pitches can be typed as names -- C4, F#3, Bb5 -- or as numbers. Phonemes
+are Sam's, in lower case with spaces between them, like d ey 1. The 1 after
+a vowel means it is stressed. The Insert phoneme button lists all forty,
+each with a word it is heard in.
 
 Ctrl+R puts in a rest. Rests are worth using: they end a phrase, and the
 program treats each phrase separately, so silences come out the length you
@@ -56,13 +74,9 @@ nudging a pitch or a length plays that note once you stop.
 Voices
 
 Press F6 to get to the tracks list, then Enter on the track. That dialog
-has the voice, the volume, the pan, and the reverb for that part.
-
-There are 87 voices. The ones with people's names sing the way you would
-expect. The ones with instrument names -- Strings, Trumpet, Piano -- are the
-same synthesiser with a recorded instrument in place of the vocal cords; they
-sing words too, and some of them sit an octave away from the note you wrote,
-which is how they were made.
+has the voice, the volume, the pan, and the reverb for that part, and the
+voice controls: vibrato, portamento, detune, and an effect -- a hall, a
+stadium, a whisper, or one of the RoboSoft robots.
 
 Ctrl+T adds another track, with its own voice and its own notes. M and
 S on a track mute and solo it.
@@ -73,41 +87,44 @@ Ctrl+comma opens the song settings: the tempo, the time signature, how
 long the consonants are, the reverb, and the voice controls that every track
 follows unless you give it its own.
 
-Saving and exporting
+Saving, importing and exporting
 
-- Ctrl+S saves the song as a .vws file.
+- Ctrl+S saves the song as a .wst file, and Ctrl+O opens one.
+- Ctrl+Shift+I imports a VocalWriter Studio project (.vws). Its phonemes
+  are changed into Sam's, and every part is sung by Sam until you choose
+  another voice. Save it afterwards to keep it as a .wst.
+- Ctrl+I imports a MIDI file. If it has no words in it, every note is
+  given aa so you can hear the tune before typing anything.
 - Ctrl+Shift+S writes the whole song to a WAV.
 - Ctrl+Shift+T writes one WAV per track.
-- Ctrl+I imports a MIDI file. If it has no words in it, every note is
-  given AA so you can hear the tune before typing anything.
 
 From a script
 
-There is a second program in the Windows folder, vocalwriter.exe, which is
-this one without the window. Give it a project or a MIDI file and somewhere
-to put the audio:
+There is a second program in the Windows folder, whistler.exe, which is
+this one without the window. Give it a song and somewhere to put the audio:
 
-    vocalwriter song.vws -o song.wav
-    vocalwriter tune.mid -o tune.wav --voice Strings --tempo 96
-    vocalwriter song.vws --tracks stems
+    whistler song.wst -o song.wav
+    whistler tune.mid -o tune.wav --voice Mary --tempo 96
+    whistler old.vws --save new.wst
+    whistler song.wst --tracks stems
 
-A MIDI file is imported the way Ctrl+I imports it, words and all. --tempo,
---voice, --consonants, --reverb, --from and --track change how it is sung
-without changing the file; --save writes a MIDI file out as a project;
---list-voices names all 87 and --pronounce says what the dictionary makes of
-a word. vocalwriter --help lists the lot.
+A MIDI file or a VocalWriter Studio project is imported the way the File
+menu imports it. --tempo, --voice, --consonants, --reverb, --from and
+--track change how it is sung without changing the file; --save writes it
+out as a song; --list-voices names the voices and --pronounce says what the
+dictionary makes of a word. whistler --help lists the lot.
 
 On a Mac it is the program inside the bundle:
 
-    "/Applications/VocalWriter Studio.app/Contents/MacOS/VocalWriterStudio" song.vws -o song.wav
+    "/Applications/Whistler Studio.app/Contents/MacOS/WhistlerStudio" song.wst -o song.wav
 
 If it stops working
 
 The song is copied automatically a couple of seconds after you change it. If
 the program closes on its own, it offers that copy back the next time you
-start it. The copy is called recovery.vws and lives in
-%APPDATA%\VocalWriter Studio on Windows, or
-~/Library/Application Support/VocalWriter Studio on a Mac.
+start it. The copy is called recovery.wst and lives in
+%APPDATA%\Whistler Studio on Windows, or
+~/Library/Application Support/Whistler Studio on a Mac.
 
 When it starts it prints a line in the Messages box that begins "this is
 build". Quote that if you report a problem.
@@ -124,5 +141,8 @@ The keys worth remembering
 
 F1 reads the full list into the Messages box.
 
-The singing is VocalWriter 2.0.1's own synthesiser, Copyright (c) 2005 KAE
-Labs. The editor is at https://github.com/masonasons/vocalwriter.
+The voices are Microsoft Sam, Mike and Mary, and are Microsoft's. The engine
+that sings them is KamiKitsune420's reconstruction of Microsoft's, at
+https://github.com/KamiKitsune420/ms-sam-mike-mary-decomp. The editor began
+as VocalWriter Studio, https://github.com/masonasons/vocalwriter, and is at
+https://github.com/RetroBunn/ms-sam-mike-mary-singing.

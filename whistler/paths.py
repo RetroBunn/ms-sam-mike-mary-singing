@@ -43,6 +43,17 @@ def program_dir():
     return source_root()
 
 
+def beside_program():
+    """Where someone would put a file beside the program. In a macOS bundle the
+    executable is three folders down, at Foo.app/Contents/MacOS, so the folder
+    the .app itself is in counts too."""
+    here = program_dir()
+    out = [here]
+    if frozen() and here.endswith(os.path.join('.app', 'Contents', 'MacOS')):
+        out.append(os.path.dirname(os.path.dirname(os.path.dirname(here))))
+    return out
+
+
 def bundled(*parts):
     """A file belonging to this program: inside a build's bundle, or in the
     checkout."""
@@ -95,8 +106,8 @@ def voice_folders(chosen=None):
     """Where voices may be, nearest first: the folder chosen in the program,
     then WHISTLER_VOICES, then `voices` beside the program, then the places
     SAPI 5 installs them."""
-    out = [f for f in (chosen, os.environ.get('WHISTLER_VOICES'),
-                       os.path.join(program_dir(), 'voices')) if f]
+    out = [f for f in (chosen, os.environ.get('WHISTLER_VOICES')) if f]
+    out += [os.path.join(d, 'voices') for d in beside_program()]
     for common in _common_files():
         out.append(os.path.join(common, 'SpeechEngines', 'Microsoft', 'TTS',
                                 '1033'))

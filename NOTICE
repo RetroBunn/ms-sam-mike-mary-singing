@@ -1,29 +1,34 @@
 Third-party notice
 ==================
 
-The MIT licence in LICENSE covers only the work in this repository: the
-PowerPC interpreter, the file-format parsers, the analysis, and VocalWriter
-Studio. The synthesiser in the `engine` submodule carries its own notice of
-the same kind.
+The MIT licence in LICENSE covers the work in this repository: Whistler
+Studio, the editor, and the code around it. The engine in the `engine`
+submodule carries its own MIT licence.
 
-It does not cover VocalWriter itself, and VocalWriter's own data files are
-distributed here:
+Neither covers Microsoft's voices. Microsoft Sam, Mike and Mary -- their voice
+files (Sam.spd, Mike.spd, Mary.spd and their .sdf files) and the dictionary
+and letter-to-sound files they share (LTTS1033.LXA, r1033tts.LXA) -- are
+Microsoft's. None of them is in this repository or in any build of it: the
+program reads them from a copy that is already on the machine it runs on,
+installed with Windows XP or the SAPI 5.1 voices. It does not change them.
 
-    assets/EnglishLex                              the dictionary
-    assets/GMSpeech.rsrc                           the voice bank
-    assets/GMBank.rsrc                             the wavetables
-    assets/VocalWriter.app/.../VocalWriter.rsrc    the engine's tables
-    assets/VocalWriter.app/.../MacOS/VocalWriter   the PowerPC binary
-    assets/License Agreement.rtf                   their licence
+Whistler Studio is not affiliated with or endorsed by Microsoft. Microsoft and
+Windows are trademarks of Microsoft Corporation. Whistler was the codename of
+the Microsoft speech engine behind these voices, and is used here to say where
+they come from.
 
-VocalWriter 2.0.1 and those files are Copyright (c) 2005 KAE Labs, all rights
-reserved. VocalWriter, VocalTracks and Resonant Articulatory Synthesis (RAS)
-are trademarks of KAE Labs. They are included so that this program runs as it
-stands, and they remain theirs: nothing here grants any right to them, and
-their own licence agreement is beside them.
+Where the parts come from:
 
-This is an interoperability and preservation project for software that has not
-been sold or supported since the PowerPC Macintosh it ran on. It is not
-affiliated with or endorsed by KAE Labs. If KAE Labs or a successor in
-interest would rather these files were not here, say so and they will be
-removed.
+    the editor    began as VocalWriter Studio by Bryn,
+                  https://github.com/masonasons/vocalwriter (MIT licence;
+                  the notice is kept in LICENSE)
+    the engine    Microsoft Sam, Mike and Mary in portable C by KamiKitsune420,
+                  https://github.com/KamiKitsune420/ms-sam-mike-mary-decomp
+                  (MIT licence), used through a fork that adds singing,
+                  https://github.com/RetroBunn/ms-sam-mike-mary-decomp
+
+VocalWriter Studio sang with VocalWriter 2.0.1, Copyright (c) 2005 KAE Labs,
+and carried its data files. Whistler Studio does not use VocalWriter and its
+files are not in the current tree, but the commits inherited from VocalWriter
+Studio still contain them. They remain KAE Labs' and are not covered by this
+repository's licence.

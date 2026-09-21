@@ -299,9 +299,10 @@ def render_to(eng, song, out, say):
     say('wrote %s, %.2f seconds, peak %.2f%s'
         % (res.get('path', out), res.get('seconds', 0), res.get('peak', 0),
            ' (from the cache)' if res.get('cached') else ''))
-    if res.get('peak', 0) >= 1.0:
-        say('it is at full scale and may be clipping: turn a track down, or '
-            'turn the reverb down')
+    if res.get('peak', 0) > 1.0:
+        # nothing clipped: the mix is turned down to fit rather than clipped
+        say('the parts added up past full scale, so the song was turned down '
+            'to fit; turning a track down keeps the rest at their level')
     return True
 
 

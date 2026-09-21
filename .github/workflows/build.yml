@@ -1,10 +1,12 @@
 # Build the editor for Windows and macOS on every push, and keep one rolling
 # `latest` release holding the newest of each.
 #
-# Two things are built: the synthesiser, which is C (the `engine` submodule),
-# and the editor around it, which is Python packaged with PyInstaller. The
-# builds carry VocalWriter 2.0.1's own data files, as this repository does --
-# they are KAE Labs' work and not covered by our licence; see NOTICE.
+# Two things are built: the engine, which is C (the `engine` submodule, built
+# at the commit this repository names), and the editor around it, which is
+# Python packaged with PyInstaller. Microsoft's voice files are in neither and
+# are not on these machines either, so what is checked here is everything that
+# needs no voice: the engine builds and loads, the tests pass -- the ones that
+# sing skip themselves -- and the packaged program starts and finds its engine.
 name: build
 
 on:
@@ -31,30 +33,14 @@ jobs:
         include:
           - os: windows-latest
             label: windows
-            asset: VocalWriterStudio-win64
+            asset: WhistlerStudio-win64
           - os: macos-14     # Apple Silicon
             label: macos
-            asset: VocalWriterStudio-macos-arm64
+            asset: WhistlerStudio-macos-arm64
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true       # the synthesiser
-
-      # The commit recorded here says which engine the editor was last tested
-      # against; the build takes the newest one instead. The two repositories
-      # move together and the checks below are what say whether they still
-      # agree -- a recorded commit that someone forgot to move on would
-      # otherwise ship an engine older than the editor calling into it.
-      - name: The engine's latest
-        shell: bash
-        run: |
-          # Fetch and check out, rather than `submodule update --remote
-          # --merge`: the checkout above clones the submodule shallowly, and
-          # merging a commit whose history does not reach into that shallow
-          # window is refused outright ("unrelated histories").
-          git -C engine fetch --depth 1 origin master
-          git -C engine checkout --detach FETCH_HEAD
-          echo "engine: $(git -C engine log -1 --format='%h %s')"
+          submodules: true       # the engine
 
       - uses: actions/setup-python@v5
         with:
@@ -63,157 +49,62 @@ jobs:
       - name: Install what the build needs
         run: |
           python -m pip install --upgrade pip
-          python -m pip install numpy cffi setuptools wxPython pyinstaller
-
-      - name: Check note announcements
-        run: python -m unittest discover -s tests
+          python -m pip install numpy setuptools wxPython pyinstaller
 
       # The Windows runners carry MSYS2's mingw-w64 GCC but do not put it on
-      # the path. Clang on macOS needs nothing.
-      - name: Find a C compiler (Windows)
+      # the path. Without it, tools/build_engine.py uses Visual Studio, which
+      # the runners also have. Clang on macOS needs nothing.
+      - name: Find MinGW (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
           for d in /c/msys64/mingw64/bin /c/msys64/ucrt64/bin /c/ProgramData/mingw64/mingw64/bin /c/mingw64/bin; do
             if [ -x "$d/gcc.exe" ]; then echo "$d" >> "$GITHUB_PATH"; echo "gcc: $d"; exit 0; fi
           done
-          echo "no mingw gcc found; what is here:"; ls /c | head -40; exit 1
+          echo "no MinGW here; the engine will be built with Visual Studio"
 
-      - name: Build the synthesiser
-        shell: bash
-        run: |
-          sh engine/build.sh
-          ls -l engine/build/libvocalwriter.*
+      - name: Build the engine
+        run: python tools/build_engine.py
 
-      # The whole program is that library: if it will not load there is
-      # nothing to ship, and a build that packages anyway is worse than one
-      # that stops here. So this makes every call the editor makes into the
-      # engine, and an engine and an editor that no longer agree fail here
-      # rather than in someone's hands -- the dictionary, the whole voice
-      # bank, a wavetable voice at the level that keeps it inside full scale,
-      # the reverb, and a phrase longer than the engine's first buffer.
-      - name: The synthesiser must load and sing
+      - name: The engine must load
         shell: bash
         run: |
           python - <<'PY'
-          import numpy as np
-          from ppc import cengine
-          from ppc.engine import Engine
-          print(cengine.describe())
-          assert cengine.available(), cengine.REASON
-          eng = Engine()
-          print(eng.ping())
-          voices = eng.voices()
-          print('%d voices: %s ...' % (len(voices), ', '.join(voices[:4])))
-          assert len(voices) > 80, voices
-          print('daisy:', eng.phonemes(['daisy']))
-          assert eng.phonemes(['daisy'])['daisy']
-
-          def part(**kw):
-              base = {'program': 0, 'volume': 1.0, 'pan': 0.0, 'notes': [
-                  {'pitch': 67, 'beats': 1.0, 'phonemes': ['d', 'EY']},
-                  {'pitch': 65, 'beats': 1.0, 'phonemes': ['z', 'IY']}]}
-              base.update(kw)
-              return base
-
-          res = eng.render({'bpm': 100, 'tracks': [part()]}, 'ci-plain.wav')
-          print('plain: %.2f s' % res['seconds'])
-          assert res['seconds'] > 1.0
-
-          strings = voices.index('Strings')
-          y, peak = eng._samples({'bpm': 100, 'reverb': {'room': 40, 'wet': 24},
-                                  'tracks': [part(voice_id=strings, pan=-0.5)]})
-          y = np.asarray(y)
-          clipped = int((np.abs(np.rint(y * 32768)) >= 32760).sum())
-          print('Strings with reverb: peak %.3f, %d samples clipped'
-                % (float(np.abs(y).max()), clipped))
-          assert clipped == 0, 'the wavetable voices are clipping again'
-          assert y.ndim == 2, 'the reverb should have made it stereo'
-
-          # The notes have to land where the score puts them. The engine
-          # can only begin one on a frame boundary, 4.99 ms, so half of that
-          # is as close as it can be asked to get; anything worse means the
-          # renderer has gone back to asking for each note's own length,
-          # which loses part of a frame every time and slides a phrase
-          # forward off the beat -- 210 ms over one phrase of a real song.
-          from ppc.render import Renderer
-          from ppc.midi import Note as ScoreNote, syllable_lengths
-          BEAT_BPM = 97.0
-          ph = ['t', 'AA']
-          line = [ScoreNote(64, 1.0, list(ph),
-                            durations=syllable_lengths(
-                                ph, 60000.0 / BEAT_BPM, 1.0))
-                  for _ in range(96)]
-          line.append(ScoreNote(64, 0.4, ['%'], velocity=1))
-          where = []
-          Renderer(program=0, bpm=BEAT_BPM).render_live(
-              line, [0] * len(line), [], lambda _t: BEAT_BPM, mark=where)
-          spb = 60.0 / BEAT_BPM
-          off = max(abs(where[i] / 44100.0 - i * spb)
-                    for i in range(96)) * 1000.0
-          print('96 notes at %g bpm: worst note %.2f ms off the beat'
-                % (BEAT_BPM, off))
-          assert off < 2.6, 'the singing has started drifting off the beat'
-
-          long_part = part(notes=[{'pitch': 60 + (i % 5), 'beats': 0.5,
-                                   'phonemes': ['AA']} for i in range(160)])
-          res = eng.render({'bpm': 120, 'tracks': [long_part]}, 'ci-long.wav')
-          print('one phrase of 160 notes: %.1f s' % res['seconds'])
-          assert res['seconds'] > 30, 'the output buffer stopped growing'
+          from whistler import libsam, paths
+          assert libsam.available(), libsam.REASON
+          print(libsam.describe())
+          print('voices here:', paths.find_voices().names() or 'none, as expected')
           PY
 
-      - name: Package
-        run: pyinstaller --noconfirm VocalWriterStudio.spec
+      - name: Tests
+        run: python -m unittest discover -s tests
 
-      # The only check that runs what is actually being shipped. The command
-      # line is the same program the window is -- same song, same engine, one
-      # entry point -- so a build that can render a song from a shell is a
-      # build whose editor can render one too, and a packaging mistake shows
-      # up here rather than in someone's hands. On Windows that is the second
-      # executable, built with a console so a shell waits for it; on macOS
-      # the one inside the bundle does both.
-      - name: The packaged program must sing
+      - name: Package
+        run: pyinstaller --noconfirm WhistlerStudio.spec
+
+      # The only check that runs what is actually being shipped. With no
+      # voices on this machine it cannot sing, but it can say which engine it
+      # is carrying, which it can only do if the library went into the build
+      # under the name the program looks for and loads from there.
+      - name: The packaged program must find its engine
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            vw="dist/VocalWriterStudio/vocalwriter.exe"
+            ws="dist/WhistlerStudio/whistler.exe"
           else
-            vw="dist/VocalWriter Studio.app/Contents/MacOS/VocalWriterStudio"
+            ws="dist/Whistler Studio.app/Contents/MacOS/WhistlerStudio"
           fi
-          python - <<'PY'
-          import json
-          notes = [{'phonemes': ['d', 'EY'], 'pitch': 67, 'beats': 1.0},
-                   {'phonemes': ['z', 'IY'], 'pitch': 65, 'beats': 1.0}]
-          with open('ci-song.vws', 'w') as fh:
-              json.dump({'format': 'vocalwriter-studio', 'version': 2,
-                         'bpm': 100,
-                         'tracks': [{'name': 'Voice 1', 'notes': notes}]}, fh)
-          PY
-          "$vw" --version
-          "$vw" --pronounce daisy
-          "$vw" ci-song.vws --list-tracks
-          "$vw" ci-song.vws -o ci-cli.wav --voice Strings --reverb 40,24
-          python - <<'PY'
-          import wave
-          w = wave.open('ci-cli.wav')
-          seconds = w.getnframes() / float(w.getframerate())
-          print('the packaged program rendered %.2f seconds, %d channels'
-                % (seconds, w.getnchannels()))
-          assert seconds > 1.0, 'it wrote a file with nothing in it'
-          assert w.getnchannels() == 2, 'the reverb should have made it stereo'
-          PY
+          "$ws" --version | tee version.txt
+          grep -q "Microsoft Sam, Mike and Mary" version.txt
 
       # The guide goes beside the program rather than inside it, so that
       # someone who unzips the folder can read it without running anything.
-      # Each platform puts it where that platform's folder is: on macOS the
-      # build makes both the collected folder and the .app, so choosing by
-      # what exists picks the wrong one.
       - name: Zip it up (Windows)
         if: runner.os == 'Windows'
         run: |
-          cp docs/read-me.txt "dist/VocalWriterStudio/Read Me.txt"
+          cp docs/read-me.txt "dist/WhistlerStudio/Read Me.txt"
           cd dist
-          7z a -tzip ${{ matrix.asset }}.zip VocalWriterStudio
+          7z a -tzip ${{ matrix.asset }}.zip WhistlerStudio
 
       # ditto with the resource forks and the executable bit left alone, which
       # is why this is `ditto` and not `zip`
@@ -221,10 +112,10 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           cd dist
-          mkdir -p "VocalWriter Studio"
-          mv "VocalWriter Studio.app" "VocalWriter Studio/"
-          cp ../docs/read-me.txt "VocalWriter Studio/Read Me.txt"
-          ditto -c -k --sequesterRsrc --keepParent "VocalWriter Studio" ${{ matrix.asset }}.zip
+          mkdir -p "Whistler Studio"
+          mv "Whistler Studio.app" "Whistler Studio/"
+          cp ../docs/read-me.txt "Whistler Studio/Read Me.txt"
+          ditto -c -k --sequesterRsrc --keepParent "Whistler Studio" ${{ matrix.asset }}.zip
 
       - uses: actions/upload-artifact@v4
         with:
