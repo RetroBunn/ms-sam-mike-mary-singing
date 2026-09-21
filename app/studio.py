@@ -779,13 +779,21 @@ class BendDialog(wx.Dialog):
 
 
 class NoteDialog(wx.Dialog):
-    """Edit one note: the phonemes sung on it, its pitch and its length."""
+    """Edit one note: the phonemes sung on it, its pitch and its length.
+
+    It works on a copy. Hearing the note and editing its bend both take the
+    fields as they stand, and taking them into the song's own note kept them
+    there however the dialog was closed: previewing and then cancelling left
+    the preview's changes in the song, where the list did not even show them.
+    The copy is what `result` hands back when OK is pressed, and nothing
+    reaches the song any other way.
+    """
 
     def __init__(self, parent, studio, note=None):
         wx.Dialog.__init__(self, parent,
                            title='Edit note' if note else 'Add note')
         self.studio = studio
-        self.note = note or Note()
+        self.note = deepcopy(note) if note else Note()
 
         outer = wx.BoxSizer(wx.VERTICAL)
         self.phon = wx.TextCtrl(self, value=self.note.text(), size=(300, -1))
