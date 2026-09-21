@@ -16,7 +16,7 @@ import os
 import subprocess
 import sys
 
-ALIAS = 'vocalwriterstudio'
+ALIAS = 'whistlerstudio'
 
 STOPPED, PLAYING = 'stopped', 'playing'
 

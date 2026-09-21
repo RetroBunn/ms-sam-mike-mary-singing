@@ -5,8 +5,8 @@ With no arguments, or with a song to open, this is the editor: see
 app/studio.py. With anything else on the command line it is the command line
 program instead -- rendering, importing, listing -- which is app/cli.py.
 
-Both executables in a Windows build run this file. VocalWriterStudio is
-windowed and vocalwriter is a console program, so that a script can wait for a
+Both executables in a Windows build run this file. The editor's is windowed
+and the command line's is a console program, so that a script can wait for a
 render and read what it said; which one was started makes no difference to
 what the arguments mean.
 """
@@ -39,8 +39,8 @@ def parse(heard):
         if not wx.GetApp():         # a dialog needs an application to sit in
             wx.App(False)
         wx.MessageBox(said.getvalue().strip() or 'that is not something '
-                      'VocalWriter Studio can be asked for',
-                      'VocalWriter Studio', wx.OK | wx.ICON_INFORMATION)
+                      'Whistler Studio can be asked for',
+                      'Whistler Studio', wx.OK | wx.ICON_INFORMATION)
         raise
     finally:
         sys.stdout, sys.stderr = out, err

@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Saving a song, reopening it, and reading one in from a MIDI file.
+"""Saving a song, reopening it, and bringing one in from elsewhere.
 
-A project is plain JSON. It holds what the editor knows and nothing else -- the
-notes, the tempo and the voice -- so it stays readable, stays small, and does
-not go stale when the engine changes. The audio is not in it; that is what
-Export WAV is for.
+A song is plain JSON, a Whistler Studio song (.wst). It holds what the editor
+knows and nothing else -- the notes, the tempo and who sings each part -- so
+it stays readable, stays small, and does not go stale when the engine
+changes. The audio is not in it; that is what Export WAV is for.
+
+Two kinds of file come in rather than open: a MIDI file, and a project from
+VocalWriter Studio (.vws), the program this one grew out of, whose phonemes
+are VocalWriter's and are said in Sam's on the way in.
 """
 import json
 import os
@@ -12,31 +16,31 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ppc.engine import DEFAULT_REVERB, clean_reverb  # noqa: E402
-from ppc.render import VOICE_DEFAULTS, clean_voice   # noqa: E402
-from ppc import phonology                                    # noqa: E402
+from whistler import phonology                               # noqa: E402
+from whistler.song import (DEFAULT_SINGER, VOICE_DEFAULTS,   # noqa: E402
+                           clean_reverb, clean_voice)
 from tools.smf import MidiFile, split_phonemes               # noqa: E402
 
-SUFFIX = '.vws'
-WILDCARD = 'VocalWriter Studio project (*.vws)|*.vws'
+SUFFIX = '.wst'
+WILDCARD = 'Whistler Studio song (*.wst)|*.wst'
+VWS_SUFFIX = '.vws'
+VWS_WILDCARD = 'VocalWriter Studio project (*.vws)|*.vws'
 MIDI_WILDCARD = 'MIDI files (*.mid;*.midi)|*.mid;*.midi'
 
-#: Bumped only if an older file would otherwise be read wrongly. Readers accept
-#: anything they understand rather than demanding an exact match. Version 2
-#: keeps the notes under `tracks` instead of at the top; a version 1 file is
-#: read as a song with one track in it, which is what it is.
-VERSION = 2
+#: what a Whistler Studio song says it is, and what a VocalWriter one says
+FORMAT = 'whistler-studio'
+VWS_FORMAT = 'vocalwriter-studio'
 
-#: two symbols the exports spell differently from the engine's own table
-PALETTE = {'OH': 'O', 'DX': 'DD'}
+#: Bumped only if an older file would otherwise be read wrongly. Readers accept
+#: anything they understand rather than demanding an exact match.
+VERSION = 1
 
 #: What a note sings when the file says nothing about what to sing. An
 #: ordinary MIDI file has pitches and lengths and no words at all, and a note
-#: with no phonemes in it is a rest -- so importing one used to give a song of
-#: the right shape that made no sound whatever, and every note had to be
-#: filled in by hand before anything could be heard. "AA" is the open vowel of
+#: with no phonemes in it is a rest -- so importing one would give a song of
+#: the right shape that made no sound whatever. "aa" is the open vowel of
 #: "father": something to sing the line on, and the obvious thing to replace.
-DEFAULT_PHONEME = 'AA'
+DEFAULT_PHONEME = 'aa'
 
 #: Pitch bend is kept as semitones, and attached to the note it happens on
 #: rather than to the song. MIDI stores it as a 14-bit number whose meaning
@@ -113,26 +117,22 @@ class Track(object):
     how a song is being worked on rather than a passing state of the window.
     """
 
-    def __init__(self, name='', program=0, volume=100, pan=0,
+    def __init__(self, name='', singer=DEFAULT_SINGER, volume=100, pan=0,
                  mute=False, solo=False, notes=None, voice=None,
-                 consonants=None, reverb=None, voice_id=None):
+                 consonants=None, reverb=None):
         self.name = name
-        #: which program change this part used to be, kept for songs written
-        #: down before voices were chosen out of the bank by name
-        self.program = int(program)
-        #: which voice of the bank sings this part. There are 87, and the ones
-        #: with instrument names sing as readily as the ones with people's
-        #: names. None means the program above still decides.
-        self.voice_id = None if voice_id is None else int(voice_id)
+        #: who sings this part, by name: Sam, Mike, Mary, or any other voice
+        #: found beside them. A name rather than a place in a list, so a song
+        #: still means the same voice on a machine with more of them.
+        self.singer = str(singer or DEFAULT_SINGER)
         self.volume = int(volume)
         self.pan = int(pan)
         self.mute = bool(mute)
         self.solo = bool(solo)
         self.notes = list(notes or [])
-        #: the engine's voice controls for this part -- colour, vibrato,
-        #: chorus, breath, detune -- or None to follow the song's, which is
-        #: what a part does unless it is given its own. See
-        #: ppc.render.VOICE_CONTROLS.
+        #: the voice controls for this part -- vibrato, portamento, detune,
+        #: the effect -- or None to follow the song's, which is what a part
+        #: does unless it is given its own. See whistler.song.VOICE_CONTROLS.
         self.voice = None if voice is None else clean_voice(voice)
         #: (room, wet) for this part, or None to follow the song's. A part
         #: sung in a different space from the rest is a real thing to want --
@@ -170,31 +170,36 @@ def tracks_from(docs):
     The rows become notes here. Everything that opens a song goes through it,
     so the window and the command line end up with the same document.
     """
-    tracks = [Track(name=t.get('name', ''), program=t.get('program', 0),
+    tracks = [Track(name=t.get('name', ''), singer=t.get('singer'),
                     volume=t.get('volume', 100), pan=t.get('pan', 0),
                     mute=t.get('mute', False), solo=t.get('solo', False),
                     voice=t.get('voice'), consonants=t.get('consonants'),
-                    reverb=t.get('reverb'), voice_id=t.get('voice_id'),
+                    reverb=t.get('reverb'),
                     notes=[Note(ph, pitch, beats, word, bend)
                            for ph, pitch, beats, word, bend in t['rows']])
               for t in docs]
     return tracks or [Track(name='Voice 1')]
 
 
-def track_voice(track, program_map=None):
-    """Which voice of the bank a part sings with.
+def joins(notes):
+    """For each note, whether it carries on the word of the note before it.
 
-    A part written down before the whole bank was offered carries a program
-    number instead; `program_map` says what that program picks, and it is
-    turned into a place in the bank the first time it is asked for, so nothing
-    is lost and nothing has to be converted twice.
+    The engine chooses its sounds differently inside a word and at a word's
+    edge, so it is told which notes belong together. Add Word writes a word
+    on its first note only, and a MIDI lyric broken over notes ends in a
+    hyphen ("count-", "ry"), so a sung note joins the one before when it has
+    no word of its own, or when that one's word runs on.
     """
-    if getattr(track, 'voice_id', None) is None:
-        track.voice_id = (program_map or {}).get(track.program, 0)
-    return track.voice_id
+    out, prev = [], None
+    for n in notes:
+        sung = not n.is_rest()
+        out.append(bool(sung and prev is not None and not prev.is_rest()
+                        and (not n.word or (prev.word or '').endswith('-'))))
+        prev = n
+    return out
 
 
-def part_dict(track, song_voice=None, program_map=None):
+def part_dict(track, song_voice=None):
     """One track for the engine. Volume and pan go out as fractions.
 
     A part with no voice controls of its own is sung with the song's, so the
@@ -205,8 +210,7 @@ def part_dict(track, song_voice=None, program_map=None):
     if voice is None:
         voice = song_voice
     own_reverb = getattr(track, 'reverb', None)
-    return {'program': track.program,
-            'voice_id': track_voice(track, program_map),
+    return {'singer': getattr(track, 'singer', DEFAULT_SINGER),
             'volume': track.volume / 100.0,
             'pan': track.pan / 100.0,
             'voice': dict(voice or {}),
@@ -214,13 +218,14 @@ def part_dict(track, song_voice=None, program_map=None):
                        else {'room': own_reverb[0], 'wet': own_reverb[1]}),
             'consonants': getattr(track, 'consonants', None),
             'notes': [{'pitch': n.pitch, 'beats': n.beats,
-                       'phonemes': n.phonemes or [REST]} for n in track.notes],
+                       'phonemes': n.phonemes or [REST], 'join': j}
+                      for n, j in zip(track.notes, joins(track.notes))],
             'bends': [[round(at, 5), round(v, 4), bool(sl)]
                       for at, v, sl in timeline(track.notes)]}
 
 
 def song_dict(bpm, tracks, consonants=1.0, voice=None, reverb=(0, 0),
-              anticipate=True, start=0.0, program_map=None):
+              anticipate=True, start=0.0):
     """The whole song as the engine wants it.
 
     `tracks` are the parts to sing and nothing else -- mute and solo have no
@@ -233,7 +238,7 @@ def song_dict(bpm, tracks, consonants=1.0, voice=None, reverb=(0, 0),
             'start': round(float(start), 6),
             'reverb': {'room': reverb[0], 'wet': reverb[1]},
             'anticipate': bool(anticipate),
-            'tracks': [part_dict(t, voice, program_map) for t in tracks]}
+            'tracks': [part_dict(t, voice) for t in tracks]}
 
 
 def export_jobs(tracks, folder, base='song'):
@@ -333,11 +338,11 @@ def parse_sig(text, fallback=DEFAULT_SIG):
 
 def save(path, bpm, tracks, sig=DEFAULT_SIG, consonants=1.0, voice=None,
          reverb=None, anticipate=True):
-    """Write a project. `tracks` are Tracks whose notes have phonemes and a
-    pitch, a length and a word. `voice` is the engine's voice controls for the
-    song, which every track that has none of its own is sung with."""
+    """Write a song. `tracks` are Tracks whose notes have phonemes and a
+    pitch, a length and a word. `voice` is the voice controls for the song,
+    which every track that has none of its own is sung with."""
     doc = {
-        'format': 'vocalwriter-studio',
+        'format': FORMAT,
         'version': VERSION,
         'bpm': float(bpm),
         'time_signature': [int(sig[0]), int(sig[1])],
@@ -360,16 +365,15 @@ def save(path, bpm, tracks, sig=DEFAULT_SIG, consonants=1.0, voice=None,
 
 def _voice_doc(values):
     """Voice controls as they are written down: only the ones moved off the
-    engine's own default, so a project that touches none of them reads the
-    same as one saved before they existed."""
+    engine's own default, so a song that touches none of them says nothing
+    about them."""
     return dict((k, int(v)) for k, v in (values or {}).items()
                 if k in VOICE_DEFAULTS and int(v) != VOICE_DEFAULTS[k])
 
 
 def _track_doc(t):
-    doc = {'name': t.name, 'program': int(t.program),
-           'voice_id': (None if getattr(t, 'voice_id', None) is None
-                        else int(t.voice_id)),
+    doc = {'name': t.name,
+           'singer': getattr(t, 'singer', DEFAULT_SINGER),
            'volume': int(t.volume), 'pan': int(t.pan),
            'mute': bool(t.mute), 'solo': bool(t.solo),
            'notes': [_note_doc(n) for n in t.notes]}
@@ -397,27 +401,85 @@ def _note_doc(n):
     return doc
 
 
+def _read_json(path):
+    with open(path, encoding='utf-8') as fh:
+        return json.load(fh)
+
+
 def load(path):
-    """Read a project: bpm, tracks, signature, consonants, voice, reverb and
+    """Read a song: bpm, tracks, signature, consonants, voice, reverb and
     whether the consonants go before the beat.
 
     A track comes back as a dictionary whose `rows` are what the editor turns
     into notes, since the note itself belongs to the editor and not here.
 
     Anything missing falls back to something sensible rather than failing: a
-    project that has lost its tempo is still worth opening. A file saved
-    before there were tracks has its notes at the top level, and is read as
-    the one track it describes.
+    song that has lost its tempo is still worth opening. A VocalWriter Studio
+    project is turned away with the way in: its phonemes are VocalWriter's,
+    and they have to be said in Sam's first, which is what `import_vws` does.
     """
-    with open(path, encoding='utf-8') as fh:
-        doc = json.load(fh)
+    doc = _read_json(path)
+    if isinstance(doc, dict) and doc.get('format') == VWS_FORMAT:
+        raise ValueError('it is a VocalWriter Studio project: File > Import '
+                         'VWS brings it in')
+    if (not isinstance(doc, dict) or doc.get('format') != FORMAT
+            or not isinstance(doc.get('tracks'), list)):
+        raise ValueError('not a Whistler Studio song')
+    return _song(doc)
+
+
+def import_vws(path):
+    """Bring in a VocalWriter Studio project: what `load` returns, and a list
+    of things to tell the person about what did not come across.
+
+    The notes, their lengths, words and bends, the tracks with their names,
+    volume, pan, mute and solo, and the tempo, signature, consonant length and
+    reverb all come across as they were. Each phoneme is said in Sam's
+    (`phonology.from_vocalwriter`). What cannot come across is anything about
+    VocalWriter's own voices: its bank of 87 and its voice controls (colour,
+    chorus, breath and the rest) belong to a different synthesiser, so every
+    part is sung by Sam with Sam's own settings until it is given others.
+    """
+    doc = _read_json(path)
     if not isinstance(doc, dict) or not ('tracks' in doc or 'notes' in doc):
         raise ValueError('not a VocalWriter Studio project')
+    if doc.get('format') == FORMAT:
+        raise ValueError('it is already a Whistler Studio song: File > Open '
+                         'opens it')
     parts = doc.get('tracks')
-    if not parts:
-        parts = [{'name': 'Voice 1', 'program': doc.get('program', 0),
-                  'notes': doc.get('notes') or []}]
-    tracks = [_read_track(part, i) for i, part in enumerate(parts)]
+    if not parts:                     # a version 1 file: one part, at the top
+        parts = [{'name': 'Voice 1', 'notes': doc.get('notes') or []}]
+    unknown, controls = set(), bool(doc.get('voice'))
+    tracks = []
+    for part in parts:
+        part = dict(part)
+        controls = controls or bool(part.get('voice'))
+        notes = []
+        for e in part.get('notes') or []:
+            e = dict(e)
+            symbols = [str(s) for s in e.get('phonemes') or []]
+            unknown.update(phonology.unknown_vocalwriter(symbols))
+            e['phonemes'] = phonology.from_vocalwriter(symbols) or [REST]
+            notes.append(e)
+        part['notes'] = notes
+        part['singer'] = DEFAULT_SINGER
+        part.pop('voice', None)       # VocalWriter's controls mean nothing here
+        tracks.append(part)
+    song = dict(doc, tracks=tracks)
+    song.pop('voice', None)
+    said = ['every part is sung by %s' % DEFAULT_SINGER]
+    if controls:
+        said.append("VocalWriter's voice controls do not carry over, so each "
+                    "part has Sam's own")
+    if unknown:
+        said.append('left out phonemes neither program knows: %s'
+                    % ' '.join(sorted(unknown)))
+    return _song(song), said
+
+
+def _song(doc):
+    """The fields a song and an imported project share, read the same way."""
+    tracks = [_read_track(part, i) for i, part in enumerate(doc['tracks'])]
     sig = doc.get('time_signature') or DEFAULT_SIG
     try:
         sig = (int(sig[0]), int(sig[1]))
@@ -439,13 +501,11 @@ def _read_track(doc, index=0):
     except (TypeError, ValueError):
         con = None
     return {'name': doc.get('name') or ('Voice %d' % (index + 1)),
-            'voice_id': (_int(doc['voice_id'], 0)
-                         if doc.get('voice_id') is not None else None),
+            'singer': str(doc.get('singer') or DEFAULT_SINGER),
             'voice': (clean_voice(doc['voice']) if 'voice' in doc else None),
             'reverb': (clean_reverb(doc['reverb']) if 'reverb' in doc
                        else None),
             'consonants': con,
-            'program': _int(doc.get('program'), 0),
             'volume': max(0, min(100, _int(doc.get('volume'), 100))),
             'pan': max(-100, min(100, _int(doc.get('pan'), 0))),
             'mute': bool(doc.get('mute')),
@@ -481,7 +541,7 @@ def _rows(entries):
 #: What copied notes are wrapped in. Notes go on the clipboard as text so they
 #: survive between two copies of the program, and so that what is on the
 #: clipboard can be looked at.
-CLIP_KEY = 'vocalwriter-studio-notes'
+CLIP_KEY = 'whistler-studio-notes'
 
 
 def to_clipboard(notes):
@@ -602,7 +662,8 @@ def from_midi(path, track_name=None, rest_beats=None, grid=None):
     -- words whose pronunciation the caller still has to look up.
 
     VocalWriter's own exports carry each note's phonemes as well as its lyric,
-    so one of those comes back complete and ready to sing. Any other MIDI has
+    so one of those comes back complete and ready to sing, its phonemes said
+    in Sam's on the way. Any other MIDI has
     only pitches, lengths and perhaps words. A lyric ending in a hyphen is half
     of a word, the way "count-" and "ry" are, so those are joined back together
     before being looked up and the pronunciation is divided over the notes they
@@ -677,7 +738,8 @@ def from_midi(path, track_name=None, rest_beats=None, grid=None):
             at = start
         word = (n.text or '').strip()
         if n.phonemes:
-            ph = [PALETTE.get(x, x) for x in split_phonemes(n.phonemes)]
+            ph = (phonology.from_vocalwriter(split_phonemes(n.phonemes))
+                  or [DEFAULT_PHONEME])
         elif word:
             ph = []                      # the lookup will fill it in
         else:

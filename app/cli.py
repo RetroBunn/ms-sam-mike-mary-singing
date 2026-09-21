@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""VocalWriter Studio without the window: a song in, a WAV out.
+"""Whistler Studio without the window: a song in, a WAV out.
 
-    vocalwriter song.vws -o song.wav
-    vocalwriter tune.mid -o tune.wav --voice Strings --tempo 96
-    vocalwriter song.vws --tracks stems
-    vocalwriter --list-voices
+    whistler song.wst -o song.wav
+    whistler tune.mid -o tune.wav --voice Mary --tempo 96
+    whistler song.wst --tracks stems
+    whistler --list-voices
 
 It is the same program the editor is. The song is built by `app.project`,
 which is what the window builds its songs with too, and it is sung by the same
 engine, so a file rendered here and the same file exported from the window are
 the same audio to the sample.
 
-A MIDI file can be given wherever a project can. It is imported exactly as
-File > Import MIDI imports it, words looked up in VocalWriter's own dictionary
-and all, so a batch of MIDI can be turned into singing without opening
-anything.
+A MIDI file or a VocalWriter Studio project can be given wherever a song can.
+Each is imported exactly as the File menu imports it -- a MIDI file's words
+looked up in Sam's dictionary, a VocalWriter project's phonemes said in Sam's
+-- so a batch of either can be turned into singing without opening anything.
 """
 import argparse
 import os
@@ -23,20 +23,21 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import project                                      # noqa: E402
+from app import settings                                     # noqa: E402
 from app import version                                      # noqa: E402
-from ppc import paths                                        # noqa: E402
-from ppc.engine import Engine, engine_name                   # noqa: E402
+from whistler import paths                                   # noqa: E402
+from whistler.engine import Engine, engine_name              # noqa: E402
 
-NAME = 'vocalwriter'
+NAME = 'whistler'
 
 EPILOG = """examples:
-  vocalwriter song.vws -o song.wav          render a song
-  vocalwriter tune.mid -o tune.wav          import a MIDI file and render it
-  vocalwriter song.vws --tracks stems       one WAV per track, into stems
-  vocalwriter tune.mid --save tune.vws      import, save, open it later
-  vocalwriter song.vws -o q.wav --tempo 90 --voice Strings
-  vocalwriter --list-voices                 every voice in the bank
-  vocalwriter --pronounce daisy bicycle     what the dictionary says
+  whistler song.wst -o song.wav             render a song
+  whistler tune.mid -o tune.wav             import a MIDI file and render it
+  whistler old.vws --save new.wst           bring in a VocalWriter Studio project
+  whistler song.wst --tracks stems          one WAV per track, into stems
+  whistler song.wst -o q.wav --tempo 90 --voice Mary
+  whistler --list-voices                    every voice found
+  whistler --pronounce daisy bicycle        what the dictionary says
 
 With a file and none of --output, --tracks or --save, the editor opens with
 that song in it. With no arguments at all, the editor opens empty."""
@@ -46,9 +47,11 @@ def build_parser():
     p = argparse.ArgumentParser(
         prog=NAME, add_help=True, epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description='Sing a VocalWriter Studio project or a MIDI file.')
+        description='Sing a Whistler Studio song, a VocalWriter Studio '
+                    'project or a MIDI file with Microsoft Sam, Mike or Mary.')
     p.add_argument('file', nargs='?', metavar='FILE',
-                   help='a project (.vws) or a MIDI file to sing')
+                   help='a song (.wst), a VocalWriter Studio project (.vws) '
+                        'or a MIDI file to sing')
 
     out = p.add_argument_group('what to write')
     out.add_argument('-o', '--output', metavar='FILE',
@@ -56,8 +59,8 @@ def build_parser():
     out.add_argument('--tracks', metavar='FOLDER',
                      help='render every track to its own WAV in this folder')
     out.add_argument('--save', metavar='FILE',
-                     help='write the song as a project (.vws), which is how a '
-                          'MIDI file becomes one')
+                     help='write the song as a Whistler Studio song (.wst), '
+                          'which is how an imported file becomes one')
 
     how = p.add_argument_group('how to sing it',
                                'each of these overrides what the file says')
@@ -67,7 +70,7 @@ def build_parser():
     how.add_argument('--tempo', type=float, metavar='BPM')
     how.add_argument('--voice', metavar='NAME',
                      help='sing every track with this voice, by name or by '
-                          'number in the bank (--list-voices says which)')
+                          'number (--list-voices says which there are)')
     how.add_argument('--consonants', type=float, metavar='PERCENT',
                      help='consonant length, 10 to 100')
     how.add_argument('--reverb', metavar='ROOM,WET',
@@ -84,11 +87,11 @@ def build_parser():
 
     tell = p.add_argument_group('what it can tell you')
     tell.add_argument('--list-voices', action='store_true',
-                      help='every voice in the bank, numbered')
+                      help='every voice found, numbered')
     tell.add_argument('--list-tracks', action='store_true',
                       help='the tracks of FILE, numbered')
     tell.add_argument('--pronounce', nargs='+', metavar='WORD',
-                      help="what VocalWriter's dictionary says a word is")
+                      help="what Sam's dictionary says a word is")
     tell.add_argument('--version', action='store_true',
                       help='which build this is, and which engine')
     p.add_argument('-q', '--quiet', action='store_true',
@@ -109,10 +112,10 @@ def attach_console():
 
     The editor is built windowed -- it is not a terminal program -- so running
     it with arguments would otherwise print into nothing at all. Borrowing the
-    console of whatever started it is what makes "VocalWriterStudio.exe
-    --help" answer. The shell does not wait for a windowed program, so the
-    prompt comes back before the output does; vocalwriter.exe, built beside it
-    as a console program, is the one to use in a script.
+    console of whatever started it is what makes the editor's executable
+    answer --help. The shell does not wait for a windowed program, so the
+    prompt comes back before the output does; the console executable built
+    beside it is the one to use in a script.
 
     True if there is somewhere to print. A console program, and anything run
     from source, has one already.
@@ -121,7 +124,7 @@ def attach_console():
         return True
     try:
         if sys.stdout is not None and sys.stdout.fileno() >= 0:
-            return True                 # vocalwriter.exe: built with one
+            return True                 # the console executable: built with one
     except Exception:                                        # noqa: BLE001
         pass                # a stream that cannot say is not a console
     try:
@@ -142,8 +145,8 @@ def attach_console():
 class Say(object):
     """Progress on the error stream, answers on the output stream.
 
-    Which matters for "vocalwriter --pronounce daisy > words.txt": the file
-    gets the answer and the terminal gets the commentary.
+    Which matters for "whistler --pronounce daisy > words.txt": the file gets
+    the answer and the terminal gets the commentary.
     """
 
     def __init__(self, quiet=False):
@@ -180,11 +183,12 @@ def parse_reverb(text):
 
 
 def find_voice(name, names):
-    """Which voice of the bank that is: a number, or a name spelled out.
+    """Which of the voices that is, as its place in `names`: a number, or a
+    name spelled out.
 
     A name is matched however it is capitalised, in full first and then as the
-    beginning of one, so "--voice trum" is Trumpet while "--voice Robert" is
-    Robert rather than an ambiguity with Robert 2.
+    beginning of one, so "--voice ma" is Mary, and a name given in full never
+    clashes with a longer one that starts the same way.
     """
     text = (name or '').strip()
     if text.isdigit():
@@ -236,12 +240,23 @@ def is_midi(path):
     return os.path.splitext(path)[1].lower() in ('.mid', '.midi')
 
 
-def open_song(path, eng, say):
-    """A project or a MIDI file, as (bpm, tracks, signature, consonants,
-    voice, reverb, anticipate).
+def is_vws(path):
+    return os.path.splitext(path)[1].lower() == project.VWS_SUFFIX
 
-    A MIDI file goes through the same import the window uses, words and all.
+
+def open_song(path, eng, say):
+    """A song, a VocalWriter Studio project or a MIDI file, as (bpm, tracks,
+    signature, consonants, voice, reverb, anticipate).
+
+    The two that are not songs go through the same imports the window uses.
     """
+    if is_vws(path):
+        (bpm, docs, sig, consonants, voice, reverb,
+         early), said = project.import_vws(path)
+        for line in said:
+            say(line)
+        return (bpm, project.tracks_from(docs), sig, consonants, voice,
+                reverb, early)
     if not is_midi(path):
         bpm, docs, sig, consonants, voice, reverb, early = project.load(path)
         return (bpm, project.tracks_from(docs), sig, consonants, voice,
@@ -264,7 +279,7 @@ def open_song(path, eng, say):
         if short:
             say('%d word%s not in the dictionary; those notes sing %s'
                 % (short, '' if short == 1 else 's', project.DEFAULT_PHONEME))
-    docs = [{'name': name, 'program': 0, 'volume': 100, 'pan': 0,
+    docs = [{'name': name, 'volume': 100, 'pan': 0,
              'mute': False, 'solo': False, 'rows': rows[k]}
             for k, (name, _rows, _p) in enumerate(got)]
     say('imported %d track%s, %d notes, %g bpm'
@@ -287,16 +302,7 @@ def render_to(eng, song, out, say):
     if res.get('peak', 0) >= 1.0:
         say('it is at full scale and may be clipping: turn a track down, or '
             'turn the reverb down')
-    if res.get('stopped_short'):
-        say('the song was cut short: a phrase with no rest in it can only '
-            'run so long')
     return True
-
-
-def program_map_of(eng):
-    """Which voice each old program number picks, for a song that names one."""
-    return {p: v for p, v in enumerate(eng.program_voices(range(128)))
-            if v is not None}
 
 
 def run(argv=None, args=None):
@@ -307,17 +313,19 @@ def run(argv=None, args=None):
     say = Say(args.quiet)
 
     if args.version:
-        Say.out('VocalWriter Studio %s' % version.describe())
+        Say.out('Whistler Studio %s' % version.describe())
         Say.out('engine: %s' % engine_name())
         Say.out('python: %s'
                 % '.'.join(str(v) for v in sys.version_info[:3]))
         return 0
 
-    absent = paths.missing()
+    chosen = settings.load().get('voice_folder') or None
+    absent = paths.missing(chosen)
     if absent:
-        return fail("VocalWriter 2.0's own files are not here. Looked in %s, "
-                    'and these are missing: %s'
-                    % (paths.data_root(), ', '.join(absent)))
+        return fail('missing %s. Looked for the voices in %s; '
+                    'WHISTLER_VOICES can name the folder they are in'
+                    % (', '.join(absent),
+                       ', '.join(paths.find_voices(chosen).looked)))
 
     if args.file and not os.path.isfile(args.file):
         return fail('there is no file called %s' % args.file)
@@ -325,7 +333,7 @@ def run(argv=None, args=None):
                           or args.list_tracks):
         return fail('which file? Give a project or a MIDI file to work on')
 
-    eng = Engine()
+    eng = Engine(voice_folder=chosen)
 
     if args.pronounce:
         for word, phones in sorted(eng.phonemes(args.pronounce).items()):
@@ -348,15 +356,10 @@ def run(argv=None, args=None):
         return fail('cannot open %s: %s' % (args.file, exc))
 
     if args.list_tracks:
-        program_map = program_map_of(eng)
-        names = eng.voices()
         for i, t in enumerate(tracks, 1):
-            pick = project.track_voice(t, program_map)
             Say.out('%2d  %-24s %-16s %3d%%  %s%s'
-                    % (i, t.name,
-                       names[pick] if pick < len(names) else 'voice %d' % pick,
-                       t.volume, project.pan_text(t.pan),
-                       '  muted' if t.mute else ''))
+                    % (i, t.name, t.singer, t.volume,
+                       project.pan_text(t.pan), '  muted' if t.mute else ''))
         say('%d track%s, %d notes, %g bpm, %s'
             % (len(tracks), '' if len(tracks) == 1 else 's',
                sum(len(t.notes) for t in tracks), round(bpm),
@@ -377,13 +380,14 @@ def run(argv=None, args=None):
     if args.anticipate is not None:
         early = args.anticipate
     if args.voice is not None:
+        names = eng.voices()
         try:
-            pick = find_voice(args.voice, eng.voices())
+            pick = find_voice(args.voice, names)
         except ValueError as exc:
             return fail(str(exc))
         for t in tracks:
-            t.voice_id = pick
-        say('every track is singing in %s' % eng.voices()[pick])
+            t.singer = names[pick]
+        say('%s is singing every track' % names[pick])
 
     try:
         wanted = chosen_tracks(tracks, args.track)
@@ -403,12 +407,10 @@ def run(argv=None, args=None):
     if not (args.output or args.tracks):
         return 0
 
-    program_map = program_map_of(eng)
-
     def song_for(parts):
         return project.song_dict(bpm, parts, consonants=consonants,
                                  voice=voice, reverb=reverb, anticipate=early,
-                                 start=args.start, program_map=program_map)
+                                 start=args.start)
 
     ok = True
     if args.output:

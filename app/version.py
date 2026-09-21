@@ -11,7 +11,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ppc import paths                                        # noqa: E402
+from whistler import paths                                   # noqa: E402
 
 STAMP = 'build.txt'
 

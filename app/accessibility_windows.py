@@ -84,7 +84,7 @@ def announce(control, text):
                            % (result & 0xFFFFFFFF))
             return False
         message = oleaut.SysAllocString(text)
-        activity = oleaut.SysAllocString('VocalWriter.NoteAdjustment')
+        activity = oleaut.SysAllocString('Whistler.NoteAdjustment')
         if not message or not activity:
             LAST_REASON = 'strings: SysAllocString returned null'
             return False

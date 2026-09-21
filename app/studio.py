@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""VocalWriter Studio -- build a line of singing, note by note.
+"""Whistler Studio -- build a line of singing for Microsoft Sam, Mike and Mary,
+note by note.
 
     python -m app.studio
 
 A note carries a *group* of phonemes and one pitch, because that is how singing
 works: a syllable sits on a note, not one phoneme per note. "Add word" looks the
-word up in VocalWriter's own dictionary and puts its phonemes on a single note,
-which can then be edited, split or removed.
+word up in Sam's own dictionary and spreads it over as many notes as it has
+syllables, and each of those can then be edited, split or removed.
 
 Everything is reachable from the keyboard and reads with a screen reader. The
 list is a native control, editing happens in dialogs with ordinary labelled
@@ -40,8 +41,9 @@ from app.project import (DEFAULT_BEATS, DEFAULT_PITCH,
                          Note, REST)                             # noqa: E402
 from app.engine import Engine                                # noqa: E402
 from app.player import PLAYING, Player                        # noqa: E402
-from ppc import paths, phonology, render                     # noqa: E402
-from ppc.song import parse_pitch                             # noqa: E402
+from whistler import paths, phonology                        # noqa: E402
+from whistler.song import (DEFAULT_SINGER, VOICE_CONTROLS,   # noqa: E402
+                           clean_voice, parse_pitch)
 
 SHARP = ('C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B')
 COLUMNS = (('Phonemes', 165), ('Pitch', 55), ('Beats', 150), ('Word', 95),
@@ -55,6 +57,7 @@ ID_ADD_WORD, ID_ADD_NOTE, ID_EDIT, ID_REMOVE = (wx.NewIdRef() for _ in range(4))
 ID_UP, ID_DOWN, ID_LONGER, ID_SHORTER = (wx.NewIdRef() for _ in range(4))
 ID_PLAY, ID_HEAR, ID_STOP, ID_KEYS = (wx.NewIdRef() for _ in range(4))
 ID_ADD_REST, ID_IMPORT, ID_EXPORT = (wx.NewIdRef() for _ in range(3))
+ID_IMPORT_VWS = wx.NewIdRef()
 ID_AUTO_PREVIEW = wx.NewIdRef()
 ID_EXPORT_TRACKS = wx.NewIdRef()
 ID_BAR_REST, ID_GOTO_BAR, ID_METRONOME = (wx.NewIdRef() for _ in range(3))
@@ -367,6 +370,27 @@ def relabel(ctrl, label):
     ctrl.SetName(label)
 
 
+def voice_control(parent, sizer, spec, value):
+    """The field for one voice control: a list to pick from when the control
+    has named choices -- the effect -- and a number otherwise."""
+    _key, choices, _default, lo, hi, label, hint = spec
+    if choices:
+        ctrl = wx.Choice(parent, choices=list(choices), size=(180, -1))
+        ctrl.SetSelection(max(0, min(len(choices) - 1, int(value))))
+    else:
+        ctrl = wx.SpinCtrl(parent, min=lo, max=hi, initial=int(value),
+                           size=(90, -1))
+    labelled(parent, sizer, label, ctrl, hint=hint)
+    return ctrl
+
+
+def control_value(ctrl):
+    """What a voice control's field says, as the number the song keeps."""
+    if isinstance(ctrl, wx.Choice):
+        return ctrl.GetSelection()
+    return ctrl.GetValue()
+
+
 class PhonemePicker(wx.Dialog):
     """Choose one phoneme, with its example word, and hear it first."""
 
@@ -399,7 +423,7 @@ class PhonemePicker(wx.Dialog):
         self.studio.engine.send(
             'preview', lambda res: wx.CallAfter(self._done, res),
             phoneme=self.chosen(), pitch=self.pitch,
-            program=self.studio.program())
+            singer=self.studio.program())
 
     def _done(self, res):
         self.preview.Enable()
@@ -411,10 +435,10 @@ class AddWordDialog(wx.Dialog):
     """Look a word up and lay it out over one note or several.
 
     A word of more than one syllable is worth more than one note -- that is
-    what singing a word means -- so the phonemes are divided at the syllable
-    boundaries and the division can be moved. VocalWriter's own scores do the
-    same thing: their lyrics are typed with hyphens, "Dai-sy", one fragment per
-    note, so a hyphen here sets the number of notes to start from.
+    what singing a word means -- so the phonemes are divided where the
+    dictionary divides the syllables and the division can be moved. Lyrics
+    are written the same way, with hyphens, "Dai-sy", one fragment per note,
+    so a hyphen here sets the number of notes to start from.
     """
 
     def __init__(self, parent, studio, pitch=DEFAULT_PITCH,
@@ -908,28 +932,24 @@ class SongSettingsDialog(wx.Dialog):
             'and all.')
         outer.Add(self.anticipate, 0, wx.ALL, 6)
 
-        # The engine's own reverb, which is two numbers in the application as
-        # well. Nothing is heard until the wet is turned up, so a song that
-        # says nothing about it sounds as it did before there was one.
+        # Two numbers: how big the room is and how much of it is heard.
+        # Nothing is heard until the amount is turned up, so a song that says
+        # nothing about it is sung dry.
         self.room = wx.SpinCtrl(self, min=0, max=100, initial=int(reverb[0]),
                                 size=(80, -1))
         labelled(self, outer, 'Reverb room', self.room,
-                 hint='how big the space is; VocalWriter used 40')
+                 hint='how big the space is; 40 is a room, 100 a cathedral')
         self.wet = wx.SpinCtrl(self, min=0, max=100, initial=int(reverb[1]),
                                size=(80, -1))
         labelled(self, outer, 'Reverb amount', self.wet,
-                 hint='per cent heard; 0 is none at all, VocalWriter used 24')
+                 hint='per cent heard; 0 is none at all, 24 is a touch')
 
-        # the engine's own voice controls, for every part that has not been
-        # given its own
+        # the voice controls, for every part that has not been given its own
         self.voice_ctrls = {}
         values = voice or {}
-        for key, _call, default, lo, hi, label, hint in render.VOICE_CONTROLS:
-            spin = wx.SpinCtrl(self, min=lo, max=hi,
-                               initial=int(values.get(key, default)),
-                               size=(90, -1))
-            labelled(self, outer, label, spin, hint=hint)
-            self.voice_ctrls[key] = spin
+        for spec in VOICE_CONTROLS:
+            self.voice_ctrls[spec[0]] = voice_control(
+                self, outer, spec, values.get(spec[0], spec[2]))
 
         outer.Add(self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL),
                   0, wx.EXPAND | wx.ALL, 8)
@@ -941,9 +961,8 @@ class SongSettingsDialog(wx.Dialog):
         return (self.tempo.GetValue(),
                 project.parse_sig(self.sig.GetValue(), self.was_sig),
                 self.consonants.GetValue(),
-                render.clean_voice(
-                    dict((k, c.GetValue())
-                         for k, c in self.voice_ctrls.items())),
+                clean_voice(dict((k, control_value(c))
+                                 for k, c in self.voice_ctrls.items())),
                 (self.room.GetValue(), self.wet.GetValue()),
                 self.anticipate.GetValue())
 
@@ -959,12 +978,16 @@ class TrackDialog(wx.Dialog):
         self.name = wx.TextCtrl(self, value=track.name, size=(220, -1))
         labelled(self, outer, 'Name', self.name)
 
-        # Every voice the bank holds, in its own order: the people's names
-        # first, then the instruments, which sing too.
-        names = studio.voice_names or ['Robert']
+        # Every voice found: Sam, Mike and Mary, and any other beside them.
+        # A song may name one this machine does not have; it stays in the
+        # list, so opening the dialog does not quietly change who sings.
+        names = list(studio.voice_names or [DEFAULT_SINGER])
+        if not any(n.lower() == track.singer.lower() for n in names):
+            names.append(track.singer)
+        self.voice_choices = names
         self.voice = wx.Choice(self, choices=names, size=(180, -1))
-        self.voice.SetSelection(min(max(0, studio.track_voice(track)),
-                                    len(names) - 1))
+        self.voice.SetSelection(next(i for i, n in enumerate(names)
+                                     if n.lower() == track.singer.lower()))
         labelled(self, outer, 'Voice', self.voice)
 
         self.volume = wx.SpinCtrl(self, min=0, max=100, initial=track.volume,
@@ -1016,10 +1039,10 @@ class TrackDialog(wx.Dialog):
             spin.Enable(own_reverb is not None)
         self.own_reverb.Bind(wx.EVT_CHECKBOX, self.on_own_reverb)
 
-        # The engine's own voice controls. Like the consonant length, a
-        # part follows the song's until it is given its own: the values shown
-        # while the box is unticked are the song's, so ticking it starts from
-        # what you were already hearing rather than from nothing.
+        # The voice controls. Like the consonant length, a part follows the
+        # song's until it is given its own: the values shown while the box is
+        # unticked are the song's, so ticking it starts from what you were
+        # already hearing rather than from nothing.
         own_voice = getattr(track, 'voice', None)
         self.own_voice = wx.CheckBox(
             self, label='&Voice controls just for this track')
@@ -1027,13 +1050,11 @@ class TrackDialog(wx.Dialog):
         outer.Add(self.own_voice, 0, wx.ALL, 6)
         self.voice_ctrls = {}
         values = own_voice if own_voice is not None else studio.song_voice
-        for key, _call, default, lo, hi, label, hint in render.VOICE_CONTROLS:
-            spin = wx.SpinCtrl(self, min=lo, max=hi,
-                               initial=int((values or {}).get(key, default)),
-                               size=(90, -1))
-            labelled(self, outer, label, spin, hint=hint)
-            spin.Enable(own_voice is not None)
-            self.voice_ctrls[key] = spin
+        for spec in VOICE_CONTROLS:
+            ctrl = voice_control(self, outer, spec,
+                                 (values or {}).get(spec[0], spec[2]))
+            ctrl.Enable(own_voice is not None)
+            self.voice_ctrls[spec[0]] = ctrl
         self.own_voice.Bind(wx.EVT_CHECKBOX, self.on_own_voice)
 
         outer.Add(self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL),
@@ -1043,14 +1064,15 @@ class TrackDialog(wx.Dialog):
         self.name.SetInsertionPointEnd()
 
     def result(self):
-        """(name, voice, volume, pan). The voice is its place in the bank."""
-        i = self.voice.GetSelection()
-        return (self.name.GetValue().strip() or 'Voice', max(0, i),
-                self.volume.GetValue(), self.pan.GetValue())
+        """(name, singer, volume, pan)."""
+        i = max(0, self.voice.GetSelection())
+        return (self.name.GetValue().strip() or 'Voice',
+                self.voice_choices[i], self.volume.GetValue(),
+                self.pan.GetValue())
 
     def on_own_voice(self, _evt):
-        for spin in self.voice_ctrls.values():
-            spin.Enable(self.own_voice.GetValue())
+        for ctrl in self.voice_ctrls.values():
+            ctrl.Enable(self.own_voice.GetValue())
 
     def on_own_reverb(self, _evt):
         for spin in (self.room, self.wet):
@@ -1063,8 +1085,8 @@ class TrackDialog(wx.Dialog):
         same as holding a copy of what the song currently says: a part that
         follows keeps following when the song settings change.
         """
-        track.voice = (render.clean_voice(
-            dict((k, c.GetValue()) for k, c in self.voice_ctrls.items()))
+        track.voice = (clean_voice(
+            dict((k, control_value(c)) for k, c in self.voice_ctrls.items()))
             if self.own_voice.GetValue() else None)
         track.consonants = (self.consonants.GetValue() / 100.0
                             if self.own_consonants.GetValue() else None)
@@ -1074,7 +1096,7 @@ class TrackDialog(wx.Dialog):
 
 class Frame(wx.Frame):
     def __init__(self, path=None):
-        wx.Frame.__init__(self, None, title='VocalWriter Studio',
+        wx.Frame.__init__(self, None, title='Whistler Studio',
                           size=(720, 560))
         #: Every part of the song. There is always at least one: a song
         #: with no tracks has nowhere to put a note.
@@ -1087,7 +1109,7 @@ class Frame(wx.Frame):
         self.bpm = 120
         self.sig = project.DEFAULT_SIG
         self.consonant_pct = 100
-        self.song_voice = render.clean_voice(None)
+        self.song_voice = clean_voice(None)
         #: (room, wet) for the song, as whole percentages. Nothing at all
         #: until it is asked for: a song that says nothing about the reverb
         #: sounds exactly as it did before there was one.
@@ -1097,20 +1119,20 @@ class Frame(wx.Frame):
         self.anticipate = True
         self.current = 0
         self._switching = False
-        self.voice_names = ['Robert']
+        self.voice_names = [DEFAULT_SINGER]
         self.palette = []
-        self.wav = os.path.join(tempfile.gettempdir(), 'vw_studio.wav')
-        self.preview_wav = os.path.join(tempfile.gettempdir(), 'vw_note.wav')
+        self.wav = os.path.join(tempfile.gettempdir(), 'whistler_song.wav')
+        self.preview_wav = os.path.join(tempfile.gettempdir(),
+                                        'whistler_note.wav')
         self.sound = None
         self.player = Player()
         self.rendering = False
-        self.path = None            # the project file, once it has one
+        self.path = None            # the song's file, once it has one
+        #: where Save offers to put a song that has no file yet: beside the
+        #: VocalWriter Studio project it was imported from
+        self.suggested = None
         self.dirty = False
 
-        #: program number -> the voice of the bank it picks, filled in when
-        #: the engine answers. Only songs written before the whole bank was
-        #: offered need it.
-        self.program_map = {}
         #: how you like to work, kept between songs and between sittings
         self.settings = settings.load()
         #: the timer that waits for the nudging to stop before previewing
@@ -1118,20 +1140,15 @@ class Frame(wx.Frame):
         #: and the one that waits before keeping a copy of the song
         self._recovery_timer = None
 
-        self.engine = Engine(on_error=self._engine_error)
+        self.engine = Engine(on_error=self._engine_error,
+                             voice_folder=self.settings.get('voice_folder'))
         self._build()
         self._history = History(self._snapshot()['document'])
         self._build_menu()
-        # The engine answers in order, so ask for the cheap things first:
-        # reading the palette is a file read, listing the voices runs sixteen
-        # program changes through the interpreter.
         self.engine.ping(lambda r: wx.CallAfter(self._ready, r))
         self.engine.send('palette',
                          lambda r: wx.CallAfter(self._set_palette, r))
         self.engine.voices(lambda r: wx.CallAfter(self._set_voices, r))
-        self.engine.send('program_voices',
-                         lambda r: wx.CallAfter(self._set_program_map, r),
-                         programs=list(range(128)))
         self.Bind(wx.EVT_CLOSE, self.on_close)
         if path:
             # a song named on the command line, or one opened from the
@@ -1289,12 +1306,15 @@ class Frame(wx.Frame):
 
         f = wx.Menu()
         f.Append(wx.ID_NEW, '&New	Ctrl+Shift+N', 'Start an empty song')
-        f.Append(wx.ID_OPEN, '&Open project...	Ctrl+O',
-                 'Reopen a song saved earlier')
-        f.Append(wx.ID_SAVE, '&Save project	Ctrl+S', 'Save the song')
-        f.Append(wx.ID_SAVEAS, 'Save project &as...',
+        f.Append(wx.ID_OPEN, '&Open song...	Ctrl+O',
+                 'Reopen a Whistler Studio song (.wst)')
+        f.Append(wx.ID_SAVE, '&Save song	Ctrl+S', 'Save the song')
+        f.Append(wx.ID_SAVEAS, 'Save song &as...',
                  'Save the song under a new name')
         f.AppendSeparator()
+        f.Append(ID_IMPORT_VWS, 'Import &VWS...	Ctrl+Shift+I',
+                 'Bring in a VocalWriter Studio project, its phonemes said in '
+                 "Sam's")
         f.Append(ID_IMPORT, '&Import MIDI...	Ctrl+I',
                  'Take the notes from a MIDI file')
         f.Append(ID_EXPORT, '&Export WAV...	Ctrl+Shift+S',
@@ -1371,6 +1391,7 @@ class Frame(wx.Frame):
                                (wx.ID_SAVE, self.on_save),
                                (wx.ID_SAVEAS, self.on_save_as),
                                (ID_IMPORT, self.on_import),
+                               (ID_IMPORT_VWS, self.on_import_vws),
                                (ID_EXPORT, self.on_export),
                                (ID_EXPORT_TRACKS, self.on_export_tracks),
                                (wx.ID_PREFERENCES, self.on_song_settings),
@@ -1501,7 +1522,8 @@ class Frame(wx.Frame):
                      + '  hear the selected note',
                      'Ctrl+M  metronome on or off, for playing only',
                      'Ctrl+. stop',
-                     'Ctrl+O open a project, Ctrl+S save it',
+                     'Ctrl+O open a song, Ctrl+S save it',
+                     'Ctrl+Shift+I  import a VocalWriter Studio project',
                      'Ctrl+I  import a MIDI file',
                      'Ctrl+Shift+S  export the whole song as one WAV',
                      'Ctrl+Shift+T  export every track to its own WAV',
@@ -1524,36 +1546,27 @@ class Frame(wx.Frame):
 
     def _ready(self, info):
         info = info or {}
-        self.say('engine ready: %s, Python %s, %s voices'
-                 % (info.get('engine', 'unknown'), info.get('python', ''),
-                    info.get('voices', '?')))
+        self.say('engine ready: %s, Python %s'
+                 % (info.get('engine', 'unknown'), info.get('python', '')))
+        self.say('voices: %s, from %s'
+                 % (', '.join(info.get('names') or []) or 'none',
+                    info.get('where') or 'nowhere'))
         self.say('this is build %s' % version.describe())
-        if info.get('bank') is False:
-            # Without GMBank the voices built on its wavetables cannot be
-            # selected at all -- the engine reads a null pointer where the
-            # wave data should be -- so name the missing file rather than
-            # letting someone find out by choosing one.
-            self.say('the instrument bank, GMBank.rsrc, is missing: the '
-                     'voices with instrument names cannot be used')
-
-    def _set_program_map(self, picks):
-        self.program_map = {p: v for p, v in enumerate(picks or [])
-                            if v is not None}
-        self.sync_tracks(select=self.current)
 
     def track_voice(self, track):
-        """Which voice of the bank a part sings with."""
-        return project.track_voice(track, self.program_map)
+        """Who sings a part."""
+        return getattr(track, 'singer', DEFAULT_SINGER)
 
     def _set_voices(self, names):
-        self.voice_names = list(names) or ['Robert']
-        self.sync_tracks(select=self.current)   # the Voice column can now say
-
-    def voice_name(self, index):
-        """What the voice at that place in the bank is called."""
-        if 0 <= index < len(self.voice_names):
-            return self.voice_names[index]
-        return 'voice %d' % index
+        self.voice_names = list(names) or [DEFAULT_SINGER]
+        self.sync_tracks(select=self.current)
+        absent = sorted({t.singer for t in self.tracks
+                         if t.singer.lower() not in
+                         [n.lower() for n in self.voice_names]})
+        if absent:
+            self.say('%s %s not on this machine, so %s sings those parts'
+                     % (', '.join(absent), 'is' if len(absent) == 1 else 'are',
+                        self.voice_names[0]))
 
     def _set_palette(self, rows):
         self.palette = rows or []
@@ -1591,7 +1604,7 @@ class Frame(wx.Frame):
     def refresh_track(self, i):
         t = self.tracks[i]
         self.tracks_list.SetItem(i, 0, t.name)
-        self.tracks_list.SetItem(i, 1, self.voice_name(self.track_voice(t)))
+        self.tracks_list.SetItem(i, 1, self.track_voice(t))
         self.tracks_list.SetItem(i, 2, '%d%%' % t.volume)
         self.tracks_list.SetItem(i, 3, project.pan_text(t.pan))
         self.tracks_list.SetItem(i, 4, self.track_state(t))
@@ -1628,8 +1641,7 @@ class Frame(wx.Frame):
         relabel(self.list, 'Notes in %s' % t.name)
         self.sync(select=t.cursor)
         self.say('%s, %s, %d note%s, %s'
-                 % (t.name, self.voice_name(self.track_voice(t)),
-                    len(t.notes),
+                 % (t.name, self.track_voice(t), len(t.notes),
                     '' if len(t.notes) == 1 else 's', self.track_state(t)))
 
     def on_track_key(self, evt):
@@ -1681,7 +1693,7 @@ class Frame(wx.Frame):
 
     @undoable('add track')
     def on_track_new(self, _evt):
-        t = project.Track(name=self.track_name(), program=self.track.program)
+        t = project.Track(name=self.track_name(), singer=self.track.singer)
         self.tracks.insert(self.current + 1, t)
         self.touch()
         self.sync_tracks(select=self.current + 1)
@@ -1696,7 +1708,7 @@ class Frame(wx.Frame):
         t = self.tracks[i]
         dlg = TrackDialog(self, self, t)
         if dlg.ShowModal() == wx.ID_OK:
-            t.name, t.voice_id, t.volume, t.pan = dlg.result()
+            t.name, t.singer, t.volume, t.pan = dlg.result()
             dlg.apply_voice(t)
             self.touch()
             self.refresh_track(i)
@@ -1704,8 +1716,7 @@ class Frame(wx.Frame):
                 relabel(self.list, 'Notes in %s' % t.name)
             reannounce(self.tracks_list, i)
             self.say('%s, %s, volume %d%%, %s, %s'
-                     % (t.name, self.voice_name(self.track_voice(t)),
-                        t.volume,
+                     % (t.name, t.singer, t.volume,
                         project.pan_text(t.pan),
                         'its own voice controls' if t.voice is not None
                         else "the song's voice controls"))
@@ -1722,7 +1733,7 @@ class Frame(wx.Frame):
             answer = wx.MessageBox(
                 'Remove %s and the %d note%s in it?'
                 % (t.name, len(t.notes), '' if len(t.notes) == 1 else 's'),
-                'VocalWriter Studio', wx.YES_NO | wx.ICON_QUESTION, self)
+                'Whistler Studio', wx.YES_NO | wx.ICON_QUESTION, self)
             if answer != wx.YES:
                 self.say('kept %s' % t.name)
                 return
@@ -2169,7 +2180,7 @@ class Frame(wx.Frame):
     # -- audio -------------------------------------------------------------
 
     def program(self):
-        """The voice of the track being worked on, for previews."""
+        """Who sings the track being worked on, for previews."""
         return self.track_voice(self.track)
 
     def song(self, notes=None, start=0.0, tracks=None):
@@ -2192,16 +2203,14 @@ class Frame(wx.Frame):
             # the level the track had before you changed them.
             t = self.track
             parts = [project.Track(
-                name=t.name, program=t.program, volume=t.volume, pan=t.pan,
+                name=t.name, singer=t.singer, volume=t.volume, pan=t.pan,
                 voice=getattr(t, 'voice', None),
                 consonants=getattr(t, 'consonants', None),
-                reverb=getattr(t, 'reverb', None),
-                voice_id=self.track_voice(t), notes=notes)]
+                reverb=getattr(t, 'reverb', None), notes=notes)]
         return project.song_dict(
             self.bpm, parts, consonants=self.consonant_pct / 100.0,
             voice=self.song_voice, reverb=self.song_reverb,
-            anticipate=self.anticipate, start=start,
-            program_map=self.program_map)
+            anticipate=self.anticipate, start=start)
 
     def playback(self, start=0.0):
         """The song as it is played: the metronome goes on here and nowhere
@@ -2492,7 +2501,7 @@ class Frame(wx.Frame):
         """Note that the song has changed, and show it in the title."""
         self.dirty = dirty
         name = os.path.basename(self.path) if self.path else 'Untitled'
-        self.SetTitle('%s%s - VocalWriter Studio'
+        self.SetTitle('%s%s - Whistler Studio'
                       % ('*' if dirty else '', name))
         self.keep_a_copy()
 
@@ -2525,7 +2534,7 @@ class Frame(wx.Frame):
         path, mark = left
         was = mark.get('path')
         answer = wx.MessageBox(
-            'VocalWriter Studio did not close properly last time, and the '
+            'Whistler Studio did not close properly last time, and the '
             'song you were working on was kept.' + chr(10) + chr(10) +
             '%d notes%s.' % (mark.get('notes', 0),
                              ', from %s' % os.path.basename(was) if was
@@ -2554,7 +2563,7 @@ class Frame(wx.Frame):
             return True
         answer = wx.MessageBox(
             'This song has changes that have not been saved. %s anyway?'
-            % what, 'VocalWriter Studio',
+            % what, 'Whistler Studio',
             wx.YES_NO | wx.CANCEL | wx.ICON_QUESTION, self)
         return answer == wx.YES
 
@@ -2572,10 +2581,11 @@ class Frame(wx.Frame):
             self.sig = project.parse_sig(project.format_sig(sig))
         if consonants:
             self.consonant_pct = max(10, min(100, int(round(consonants * 100))))
-        self.song_voice = render.clean_voice(voice)
+        self.song_voice = clean_voice(voice)
         self.song_reverb = tuple(reverb or (0, 0))
         self.anticipate = bool(anticipate)
         self.path = path
+        self.suggested = None
         self.sync_tracks(select=0)
         self.sync(select=0)
         self._history = History(self._snapshot()['document'] if path else None)
@@ -2585,8 +2595,9 @@ class Frame(wx.Frame):
         if not self.may_discard('Start a new song'):
             return
         self.tracks = [project.Track(name='Voice 1',
-                                     program=self.track.program)]
+                                     singer=self.track.singer)]
         self.path = None
+        self.suggested = None
         self.sync_tracks(select=0)
         self.sync()
         self._history = History(self._snapshot()['document'])
@@ -2594,9 +2605,9 @@ class Frame(wx.Frame):
         self.say('new song')
 
     def on_open(self, _evt):
-        if not self.may_discard('Open another project'):
+        if not self.may_discard('Open another song'):
             return
-        with wx.FileDialog(self, 'Open project', wildcard=project.WILDCARD,
+        with wx.FileDialog(self, 'Open song', wildcard=project.WILDCARD,
                            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dlg:
             if dlg.ShowModal() != wx.ID_OK:
                 return
@@ -2604,7 +2615,10 @@ class Frame(wx.Frame):
         self.open_project(path)
 
     def open_project(self, path):
-        """Open a project by name: the file dialog, and the command line."""
+        """Open a song by name: the file dialog, and the command line. A
+        VocalWriter Studio project named on the command line is imported."""
+        if path.lower().endswith(project.VWS_SUFFIX):
+            return self.import_vws(path)
         try:
             (bpm, tracks, sig, consonants, voice, reverb,
              early) = project.load(path)
@@ -2623,8 +2637,12 @@ class Frame(wx.Frame):
         return self.on_save_as(None)
 
     def on_save_as(self, _evt):
-        with wx.FileDialog(self, 'Save project', wildcard=project.WILDCARD,
-                           defaultFile='song' + project.SUFFIX,
+        # an imported project is offered its own name and folder, as a .wst
+        where = self.path or self.suggested or 'song' + project.SUFFIX
+        with wx.FileDialog(self, 'Save song', wildcard=project.WILDCARD,
+                           defaultDir=os.path.dirname(where),
+                           defaultFile=os.path.splitext(
+                               os.path.basename(where))[0] + project.SUFFIX,
                            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT) as dlg:
             if dlg.ShowModal() != wx.ID_OK:
                 return
@@ -2648,6 +2666,44 @@ class Frame(wx.Frame):
                  % (os.path.basename(path), len(self.tracks),
                     '' if len(self.tracks) == 1 else 's',
                     sum(len(t.notes) for t in self.tracks)))
+
+    # -- VocalWriter Studio ------------------------------------------------
+
+    def on_import_vws(self, _evt):
+        if not self.may_discard('Import over it'):
+            return
+        with wx.FileDialog(self, 'Import VWS', wildcard=project.VWS_WILDCARD,
+                           style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            path = dlg.GetPath()
+        self.import_vws(path)
+
+    def import_vws(self, path):
+        """Bring in a VocalWriter Studio project as a new, unsaved song.
+
+        It is not opened as it is: its phonemes are VocalWriter's and are said
+        in Sam's on the way in, so what comes in is a different file's worth of
+        song, and saving it writes a .wst beside the original rather than over
+        it.
+        """
+        try:
+            (bpm, tracks, sig, consonants, voice, reverb,
+             early), said = project.import_vws(path)
+        except (OSError, ValueError) as exc:
+            self.say('cannot import %s: %s' % (os.path.basename(path), exc))
+            return
+        self.take(bpm, tracks, None, sig, consonants, voice, reverb, early)
+        # Save offers the same name with the new ending, in the same folder
+        self.path = None
+        self.suggested = os.path.splitext(path)[0] + project.SUFFIX
+        self.say('imported %s: %d track%s, %d notes, %g bpm'
+                 % (os.path.basename(path), len(self.tracks),
+                    '' if len(self.tracks) == 1 else 's',
+                    sum(len(t.notes) for t in self.tracks), bpm))
+        for line in said:
+            self.say(line)
+        self.say('Ctrl+S saves it as a Whistler Studio song')
 
     # -- MIDI --------------------------------------------------------------
 
@@ -2688,8 +2744,8 @@ class Frame(wx.Frame):
         except (OSError, ValueError) as exc:
             self.say('cannot import: %s' % exc)
             return
-        program = self.track.program
-        self.take(bpm, [{'name': name, 'program': program, 'volume': 100,
+        singer = self.track.singer
+        self.take(bpm, [{'name': name, 'singer': singer, 'volume': 100,
                          'pan': 0, 'mute': False, 'solo': False, 'rows': rows}
                         for name, rows, _pending in got], sig=sig)
         self.say('imported %s: %d track%s, %d notes, %g bpm, %s'
@@ -2702,9 +2758,8 @@ class Frame(wx.Frame):
             self.say('it carried no words, so every note sings %s. '
                      'Ctrl+W puts a word on one.' % project.DEFAULT_PHONEME)
         if len(got) > 1:
-            self.say('every part is singing in %s. Enter on a track gives it '
-                     'its own voice, volume and pan.'
-                     % self.voice_name(self.program_map.get(program, 0)))
+            self.say('%s is singing every part. Enter on a track gives it '
+                     'its own voice, volume and pan.' % singer)
         # which track each word landed on, since a lookup comes back for the
         # whole file at once
         pending = [(k, word, indices)
@@ -2749,19 +2804,44 @@ class Frame(wx.Frame):
 
 
 def main(path=None):
-    missing = paths.missing()
+    """Start the editor, once the engine and the voices can be found.
+
+    The voices are Microsoft's and not part of this program. On a machine
+    where they are installed they are found without asking; otherwise the
+    folder holding them can be chosen here, and it is remembered.
+    """
     app = wx.App(False)
-    if missing:
-        nl = chr(10)
-        wx.MessageBox(
-            "VocalWriter Studio needs VocalWriter 2.0's own "
-            "files, which are not part of this program." + nl + nl +
-            'Put them in a folder named "assets" next to this '
-            'application.' + nl + nl +
-            'Missing:' + nl + '  ' + (nl + '  ').join(missing) +
-            nl + nl + 'Looked in:' + nl + '  ' + paths.data_root(),
-            'VocalWriter files not found', wx.OK | wx.ICON_INFORMATION)
-        return
+    prefs = settings.load()
+    nl = chr(10)
+    while True:
+        missing = paths.missing(prefs.get('voice_folder'))
+        if not missing:
+            break
+        if not paths.library():
+            wx.MessageBox(
+                'Whistler Studio cannot find its engine library, %s.'
+                % paths.LIBRARY + nl + nl + 'From a copy of the source, '
+                'python tools/build_engine.py builds it.',
+                'Engine not found', wx.OK | wx.ICON_INFORMATION)
+            return
+        looked = paths.find_voices(prefs.get('voice_folder')).looked
+        answer = wx.MessageBox(
+            'Whistler Studio sings with Microsoft Sam, Mike and Mary, and '
+            "their voice files are Microsoft's, not part of this program. "
+            'They come with Windows XP and with the SAPI 5.1 voices.' + nl + nl +
+            'Missing:' + nl + '  ' + (nl + '  ').join(missing) + nl + nl +
+            'Looked in:' + nl + '  ' + (nl + '  ').join(looked) + nl + nl +
+            'Choose the folder that holds them?',
+            'Voice files not found', wx.YES_NO | wx.ICON_INFORMATION)
+        if answer != wx.YES:
+            return
+        with wx.DirDialog(None, 'The folder with Sam.spd in it',
+                          style=wx.DD_DEFAULT_STYLE
+                          | wx.DD_DIR_MUST_EXIST) as dlg:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            prefs['voice_folder'] = dlg.GetPath()
+        settings.save(prefs)
     Frame(path).Show()
     app.MainLoop()
 

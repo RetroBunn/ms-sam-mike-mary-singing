@@ -1,19 +1,12 @@
 #!/usr/bin/env python3
 """The engine, in this process, answering on a worker thread.
 
-There used to be a second process here, spoken to in JSON lines. That was not
-architecture for its own sake: a render under the PowerPC interpreter ran tens
-of millions of guest instructions and took roughly as long as the music lasts,
-and nothing that slow can happen on the thread that draws the window. The C
-engine renders a minute of singing in a few hundredths of a second, so the
-process boundary bought nothing and cost a serialisation of every request.
-
-The thread stays. A render is fast, not instant -- a long song is still a
-fraction of a second, and a fraction of a second of a frozen window is the
-difference between an interface that answers and one that stutters. Requests
-go on a queue, they are answered in the order they were asked, and the answer
-arrives in a callback; whoever asked hands it back to the window with
-`wx.CallAfter`, as it always did.
+A render is fast, not instant -- Sam sings a minute of song in a small
+fraction of a second, but a fraction of a second of a frozen window is the
+difference between an interface that answers and one that stutters. So
+requests go on a queue, they are answered in the order they were asked, and
+the answer arrives in a callback; whoever asked hands it back to the window
+with `wx.CallAfter`.
 """
 import os
 import queue
@@ -23,14 +16,16 @@ import threading
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from ppc.engine import Engine as Synthesiser                 # noqa: E402
+from whistler.engine import Engine as Synthesiser            # noqa: E402
 
 
 class Engine(object):
-    """What the window asks; the same surface the engine process had."""
+    """What the window asks, answered on the worker thread."""
 
-    def __init__(self, on_error=None):
+    def __init__(self, on_error=None, voice_folder=None):
         self.on_error = on_error
+        #: the folder of voices chosen in the program, if one was
+        self.voice_folder = voice_folder
         self._q = queue.Queue()
         self._eng = None
         self._lock = threading.Lock()
@@ -44,12 +39,12 @@ class Engine(object):
     def engine(self):
         """Built on the worker thread, the first time something is asked.
 
-        Opening it reads the voice bank and the tables, which is quick but not
+        Opening it looks for the voices and reads one, which is quick but not
         free, and doing it here means the window is already up and saying so
         rather than waiting on it.
         """
         if self._eng is None:
-            self._eng = Synthesiser()
+            self._eng = Synthesiser(voice_folder=self.voice_folder)
         return self._eng
 
     def _run(self):
@@ -86,9 +81,6 @@ class Engine(object):
 
     def voices(self, cb):
         self.send('voices', cb)
-
-    def program_voices(self, programs, cb):
-        self.send('program_voices', cb, programs=list(programs))
 
     def render(self, song, out, cb):
         self.send('render', cb, song=song, out=out)

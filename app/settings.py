@@ -14,12 +14,15 @@ import json
 import os
 import sys
 
-APP = 'VocalWriter Studio'
+APP = 'Whistler Studio'
 
 DEFAULTS = {
     #: preview a note as it is nudged, so pitch and length can be heard
     #: rather than read
     'auto_preview': False,
+    #: the folder holding Microsoft's voice files, when they were chosen by
+    #: hand rather than found where Windows installs them
+    'voice_folder': '',
 }
 
 
@@ -33,7 +36,7 @@ def folder():
                             'Application Support', APP)
     base = os.environ.get('XDG_CONFIG_HOME') or os.path.join(
         os.path.expanduser('~'), '.config')
-    return os.path.join(base, 'vocalwriter-studio')
+    return os.path.join(base, 'whistler-studio')
 
 
 def path():

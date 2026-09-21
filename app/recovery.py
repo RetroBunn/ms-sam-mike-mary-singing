@@ -18,7 +18,7 @@ import time
 from app import project
 from app import settings
 
-NOTES = 'recovery.vws'
+NOTES = 'recovery.wst'
 MARK = 'recovery.json'
 
 

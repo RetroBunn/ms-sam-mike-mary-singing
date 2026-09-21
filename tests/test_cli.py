@@ -14,7 +14,7 @@ from app import cli, project
 
 
 def track(name='Voice 1', **kw):
-    kw.setdefault('notes', [project.Note(['d', 'EY'], 67, 1.0, 'day')])
+    kw.setdefault('notes', [project.Note(['d', 'ey', '1'], 67, 1.0, 'day')])
     return project.Track(name=name, **kw)
 
 
@@ -23,27 +23,32 @@ class ArgumentTests(unittest.TestCase):
         return cli.build_parser().parse_args(list(argv))
 
     def test_a_file_on_its_own_is_a_window_not_a_job(self):
-        self.assertFalse(cli.wants_console(self.parse('song.vws')))
+        self.assertFalse(cli.wants_console(self.parse('song.wst')))
         self.assertFalse(cli.wants_console(self.parse()))
-        for job in (['song.vws', '-o', 'out.wav'], ['song.vws', '--tracks', 'd'],
-                    ['song.vws', '--save', 'x.vws'], ['--list-voices'],
+        for job in (['song.wst', '-o', 'out.wav'], ['song.wst', '--tracks', 'd'],
+                    ['old.vws', '--save', 'x.wst'], ['--list-voices'],
                     ['--version'], ['--pronounce', 'daisy']):
             self.assertTrue(cli.wants_console(self.parse(*job)), job)
 
+    def test_the_kind_of_file_is_told_by_its_ending(self):
+        self.assertTrue(cli.is_vws('old.VWS'))
+        self.assertTrue(cli.is_midi('tune.mid'))
+        self.assertFalse(cli.is_vws('song.wst') or cli.is_midi('song.wst'))
+
     def test_the_overrides_are_read(self):
-        args = self.parse('song.vws', '-o', 'out.wav', '--tempo', '96',
+        args = self.parse('song.wst', '-o', 'out.wav', '--tempo', '96',
                           '--consonants', '40', '--from', '8',
                           '--track', 'Lead', '--track', 'Bass',
                           '--no-anticipate')
-        self.assertEqual(args.file, 'song.vws')
+        self.assertEqual(args.file, 'song.wst')
         self.assertEqual(args.output, 'out.wav')
         self.assertEqual((args.tempo, args.consonants, args.start), (96, 40, 8))
         self.assertEqual(args.track, ['Lead', 'Bass'])
         self.assertIs(args.anticipate, False)
 
     def test_anticipation_says_nothing_unless_it_is_asked_about(self):
-        self.assertIsNone(self.parse('song.vws').anticipate)
-        self.assertIs(self.parse('song.vws', '--anticipate').anticipate, True)
+        self.assertIsNone(self.parse('song.wst').anticipate)
+        self.assertIs(self.parse('song.wst', '--anticipate').anticipate, True)
 
     def test_reverb(self):
         self.assertEqual(cli.parse_reverb('40,24'), (40, 24))
@@ -54,18 +59,19 @@ class ArgumentTests(unittest.TestCase):
 
 
 class VoiceTests(unittest.TestCase):
-    NAMES = ['Robert', 'Robert 2', 'Strings', 'Trumpet', 'TrumpetMid']
+    # Sam, Mike and Mary, and two voices built with the engine's annavoice
+    NAMES = ['Sam', 'Mike', 'Mary', 'Anna', 'Anna 2']
 
     def test_by_name_by_number_and_by_the_beginning_of_a_name(self):
-        self.assertEqual(cli.find_voice('Strings', self.NAMES), 2)
-        self.assertEqual(cli.find_voice('strings', self.NAMES), 2)
-        self.assertEqual(cli.find_voice('str', self.NAMES), 2)
-        self.assertEqual(cli.find_voice('3', self.NAMES), 3)
+        self.assertEqual(cli.find_voice('Mary', self.NAMES), 2)
+        self.assertEqual(cli.find_voice('mary', self.NAMES), 2)
+        self.assertEqual(cli.find_voice('ma', self.NAMES), 2)
+        self.assertEqual(cli.find_voice('1', self.NAMES), 1)
         # a name in full beats a name that is only the start of another
-        self.assertEqual(cli.find_voice('Robert', self.NAMES), 0)
+        self.assertEqual(cli.find_voice('Anna', self.NAMES), 3)
 
     def test_what_it_refuses(self):
-        for wrong in ('trum', 'nosuch', '99'):
+        for wrong in ('an', 'nosuch', '99'):
             with self.assertRaises(ValueError):
                 cli.find_voice(wrong, self.NAMES)
 
@@ -107,13 +113,23 @@ class SongTests(unittest.TestCase):
         self.assertEqual(song['tracks'][0]['notes'][0]['phonemes'],
                          [project.REST])
 
-    def test_a_program_number_becomes_a_place_in_the_bank_once(self):
-        t = track(program=7)
-        song = project.song_dict(120, [t], program_map={7: 42})
-        self.assertEqual(song['tracks'][0]['voice_id'], 42)
-        self.assertEqual(t.voice_id, 42)
-        # asked again with nothing to look it up in, it still knows
-        self.assertEqual(project.track_voice(t, {}), 42)
+    def test_each_part_says_who_sings_it(self):
+        song = project.song_dict(120, [track(), track('Alto', singer='Mary')])
+        self.assertEqual([p['singer'] for p in song['tracks']],
+                         ['Sam', 'Mary'])
+
+    def test_the_notes_of_one_word_are_joined(self):
+        # Add Word writes the word on its first note; a MIDI lyric broken over
+        # notes ends in a hyphen; a rest joins nothing
+        notes = [project.Note(['d', 'ey', '1'], 60, 1, 'daisy'),
+                 project.Note(['z', 'iy'], 60, 1, ''),
+                 project.Note(['%'], 60, 1, ''),
+                 project.Note(['k', 'ah', '1', 'n'], 60, 1, 'coun-'),
+                 project.Note(['t', 'r', 'iy'], 60, 1, 'try'),
+                 project.Note(['g', 'ow', '1'], 60, 1, 'go')]
+        song = project.song_dict(120, [track(notes=notes)])
+        self.assertEqual([n['join'] for n in song['tracks'][0]['notes']],
+                         [False, True, False, False, True, False])
 
     def test_the_reverb_and_the_consonants_are_the_song_s(self):
         song = project.song_dict(90, [track()], consonants=0.4,
@@ -141,11 +157,20 @@ class PronounceTests(unittest.TestCase):
     def test_a_word_the_dictionary_knows_and_one_it_does_not(self):
         rows = [[([], 60, 1.0, 'daisy', []), ([], 62, 1.0, 'zzzq', [])]]
         pending = [(0, 'daisy', [0]), (0, 'zzzq', [1])]
-        out, got = project.pronounce(rows, pending,
-                                     {'daisy': ['d', 'EY', 'z', 'IY']})
+        out, got = project.pronounce(
+            rows, pending, {'daisy': ['d', 'ey', '1', '-', 'z', 'iy']})
         self.assertEqual(got, 1)
-        self.assertEqual(out[0][0][0], ['d', 'EY', 'z', 'IY'])
+        # on one note the syllables run together; the division is not sung
+        self.assertEqual(out[0][0][0], ['d', 'ey', '1', 'z', 'iy'])
         self.assertEqual(out[0][1][0], [project.DEFAULT_PHONEME])
+
+    def test_a_word_over_two_notes_divides_where_the_dictionary_does(self):
+        rows = [[([], 60, 1.0, 'dai-', []), ([], 62, 1.0, 'sy', [])]]
+        out, _got = project.pronounce(
+            rows, [(0, 'daisy', [0, 1])],
+            {'daisy': ['d', 'ey', '1', '-', 'z', 'iy']})
+        self.assertEqual([r[0] for r in out[0]],
+                         [['d', 'ey', '1'], ['z', 'iy']])
 
 
 if __name__ == '__main__':
