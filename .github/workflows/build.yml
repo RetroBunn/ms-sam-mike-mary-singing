@@ -130,6 +130,31 @@ jobs:
           assert clipped == 0, 'the wavetable voices are clipping again'
           assert y.ndim == 2, 'the reverb should have made it stereo'
 
+          # The notes have to land where the score puts them. The engine
+          # can only begin one on a frame boundary, 4.99 ms, so half of that
+          # is as close as it can be asked to get; anything worse means the
+          # renderer has gone back to asking for each note's own length,
+          # which loses part of a frame every time and slides a phrase
+          # forward off the beat -- 210 ms over one phrase of a real song.
+          from ppc.render import Renderer
+          from ppc.midi import Note as ScoreNote, syllable_lengths
+          BEAT_BPM = 97.0
+          ph = ['t', 'AA']
+          line = [ScoreNote(64, 1.0, list(ph),
+                            durations=syllable_lengths(
+                                ph, 60000.0 / BEAT_BPM, 1.0))
+                  for _ in range(96)]
+          line.append(ScoreNote(64, 0.4, ['%'], velocity=1))
+          where = []
+          Renderer(program=0, bpm=BEAT_BPM).render_live(
+              line, [0] * len(line), [], lambda _t: BEAT_BPM, mark=where)
+          spb = 60.0 / BEAT_BPM
+          off = max(abs(where[i] / 44100.0 - i * spb)
+                    for i in range(96)) * 1000.0
+          print('96 notes at %g bpm: worst note %.2f ms off the beat'
+                % (BEAT_BPM, off))
+          assert off < 2.6, 'the singing has started drifting off the beat'
+
           long_part = part(notes=[{'pitch': 60 + (i % 5), 'beats': 0.5,
                                    'phonemes': ['AA']} for i in range(160)])
           res = eng.render({'bpm': 120, 'tracks': [long_part]}, 'ci-long.wav')

@@ -374,6 +374,29 @@ level from beginning to end (peak 0.958 to 0.968 across every ten-second
 window). Phrases are still split at rests, for the timing: a rest is a silence
 of an exact length, and a continuous render compresses it.
 
+**The singing used to slide off the beat, and that one was arithmetic.**
+The engine has no clock finer than a frame -- 220 samples, 4.99 ms -- and
+`Syllable_Duration` takes a note's length as `floor(beats * frames per beat)`.
+Asked for each note's own length in turn, a note is therefore never given the
+part of a frame it asked for, and since the loss is always downwards it adds
+up: at 115 bpm a beat is 104.585 frames and every note leaves .585 of one
+behind, so a phrase walks forward at about 3 ms a note. At 97 bpm, where an
+eighth note comes to 61.996 frames, it is 5 ms a note. Across three real
+songs the worst note was **210 ms** ahead of where it was written -- most of a
+sixteenth -- and because a phrase snaps back to the beat at the next rest, it
+reads as unsteadiness rather than as a tempo that is simply fast.
+
+The fix is not to ask for lengths. Each note is asked for the frames that put
+the *next* one where the score puts it, so the position is what is kept and
+the length is whatever is left between one position and the next; aiming at
+the middle of a frame rather than its edge makes the engine's floor land where
+it is meant to. The error is then half a frame either way and never
+accumulates. The same three songs: worst note **2.5 ms**, which is the
+engine's own resolution. Measured in the audio as well as in the score -- the
+rendered envelope now repeats every 521.60 ms where a beat at 115 bpm is
+521.74, against 518.82 before. `tests/test_timing.py` checks the arithmetic
+without needing the synthesiser, and the build checks a rendered phrase.
+
 **Speed.** A 60-second song renders in about half a second, cold. The
 interpreter it replaced runs at roughly a tenth of real time in one process --
 85 seconds of singing took 8 seconds of CPU with the compiled core, and far

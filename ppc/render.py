@@ -77,11 +77,43 @@ def engine_name():
     return cengine.describe()
 
 SAMPLE_RATE = 44100
-FRAMES_PER_SEC = 200.45
 SAMPLES_PER_FRAME = 220
 
+#: How many frames a second is: 200.4545..., and exactly that. The engine has
+#: no finer clock -- a note lasts a whole number of frames and can begin only
+#: where one does -- so this is the resolution everything below is placed to.
+FRAMES_A_SECOND = SAMPLE_RATE / float(SAMPLES_PER_FRAME)
+
 BPM = 120.0
-TEMPO_SCALE = 1.0 / 240.0       # calibrated so frames/beat matches 200.45 fps
+TEMPO_SCALE = 1.0 / 240.0       # calibrated so frames/beat matches the above
+
+
+def frames_per_beat(bpm):
+    """What the engine will make of a beat at this tempo, to the last bit.
+
+    `SetTempo` works out frames per beat as
+    `12027.2727273 / (tempoMul * bpm) / 240`, in single precision, and
+    `Syllable_Duration` then takes a note's length as
+    `floor(beats * that)`. The floor is the whole trouble: a note is never
+    given the part of a frame it asks for, so every note of a phrase comes
+    out a little short and the shortfall adds up -- at 115 bpm a beat is
+    104.585 frames, every note loses .585 of one, and by the ninety-sixth
+    note of a phrase the singing is 93 ms ahead of the beat.
+
+    Reproducing the arithmetic exactly, rather than approximately, is what
+    lets `Renderer._note_call` ask for a particular number of frames and get
+    it. Checked against the engine at every tempo it accepts, 10 to 250.
+    """
+    product = np.float32(np.float32(TEMPO_SCALE) * np.float32(bpm))
+    return float(np.float32(12027.2727273 / float(product) / 240.0))
+
+
+def engine_tempo(bpm):
+    """The tempo the engine is actually set to: whole beats a minute, in
+    range. A song at 115.5 is sung at 116 and there is nothing to be done
+    about that in the engine -- but the notes can still be placed by the
+    tempo the song is written at, which is what `_note_call` does."""
+    return max(10, min(250, int(round(float(bpm)))))
 
 CTX_SEQ_COUNT = 0xffc
 CTX_DURATIONS = 0xff8
@@ -247,7 +279,8 @@ class Renderer(object):
         """Build the engine state a render runs on; returns the engine."""
         eng = open_engine()
         eng.tempo_scale(TEMPO_SCALE)
-        eng.tempo(int(self.bpm))
+        eng.tempo(engine_tempo(self.bpm))
+        self._begin()
         blob, _n = self._sequence(notes)
         if program is None and self.voice_id is not None:
             eng.voice(self.voice_id)
@@ -304,14 +337,40 @@ class Renderer(object):
         # the period, which sounds exactly like a voice with no pitch.
         return np.stack([raw[0::4], raw[1::4]], axis=1).ravel() / 32768.0
 
-    def _note_call(self, eng, note):
+    def _begin(self):
+        """Start the clock a phrase is laid out against."""
+        #: where the notes handed over so far ought to have ended, in seconds
+        self._due = 0.0
+        #: and how many frames the engine has actually been given for them
+        self._given = 0
+
+    def _note_call(self, eng, note, bpm=None):
         """Speech_Note(g, chan, note, ?, velocity, beats).
 
         The velocity is the *fifth* integer: it lands in ctx[0x1000], which
         DoNote turns into the note amplitude ctx[0x10c4], and SaveFrame copies
         into the frame as the factor the whole voiced branch is scaled by.
+
+        The length is not the note's own. The engine floors a note to whole
+        frames, so asking for each note's length in turn loses up to a frame
+        every time, always downwards, and a phrase slides forward off the
+        beat -- 93 ms over one phrase of one of these songs. So each note is
+        asked for the frames that get the *next* one to where the score puts
+        it: the position is what is kept, and the length is whatever is left
+        between one position and the next. An error can then be half a frame
+        either way, 2.5 ms, and it never accumulates.
+
+        Aiming at the middle of a frame rather than at its edge is what makes
+        the floor land where it is meant to, whatever the last bit of the
+        arithmetic does.
         """
-        eng.note(note.midi, 0, note.velocity, note.beats)
+        played = float(bpm if bpm else self.bpm)
+        self._due += note.beats * 60.0 / max(played, 1e-6)
+        want = int(round(self._due * FRAMES_A_SECOND))
+        frames = max(1, want - self._given)
+        self._given += frames
+        eng.note(note.midi, 0, note.velocity,
+                 (frames + 0.5) / frames_per_beat(engine_tempo(played)))
 
     def render(self, notes):
         eng = self._setup(notes)
@@ -359,8 +418,9 @@ class Renderer(object):
             if mark is not None:
                 # waveIndex counts halfwords, four per pair of mono samples
                 mark.append(eng.wave_index // 2)
-            eng.tempo(max(10, min(250, int(round(bpm(tick))))))
-            self._note_call(eng, note)
+            here = bpm(tick)
+            eng.tempo(engine_tempo(here))
+            self._note_call(eng, note, here)
 
         feed()
         frames = 0
