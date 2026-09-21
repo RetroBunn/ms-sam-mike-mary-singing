@@ -790,7 +790,7 @@ class NoteDialog(wx.Dialog):
         outer = wx.BoxSizer(wx.VERTICAL)
         self.phon = wx.TextCtrl(self, value=self.note.text(), size=(300, -1))
         labelled(self, outer, 'Phonemes', self.phon, 1,
-                 hint='separated by spaces')
+                 hint="Sam's, separated by spaces, as in d ey 1")
 
         row = wx.BoxSizer(wx.HORIZONTAL)
         ins = wx.Button(self, label='&Insert phoneme...')
@@ -821,8 +821,22 @@ class NoteDialog(wx.Dialog):
         outer.Add(points, 0, wx.ALL, 6)
         outer.Add(self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL),
                   0, wx.EXPAND | wx.ALL, 8)
+        ok = self.FindWindowById(wx.ID_OK)
+        if ok:
+            ok.Bind(wx.EVT_BUTTON, self.on_ok)
         self.SetSizerAndFit(outer)
         self.phon.SetFocus()
+
+    def on_ok(self, evt):
+        """The phonemes kept to the engine's before the dialog closes, and
+        anything that is not one of them said out loud rather than kept, so a
+        note only ever holds what the engine has."""
+        sam, left = phonology.clean(self.phon.GetValue().split())
+        self.phon.ChangeValue(' '.join(sam))
+        if left:
+            self.studio.say("left out %s: not one of Sam's phonemes"
+                            % ' '.join(left))
+        evt.Skip()                         # and close, as OK does
 
     def on_insert(self, _evt):
         if not self.studio.singable():
@@ -877,7 +891,7 @@ class NoteDialog(wx.Dialog):
             return DEFAULT_PITCH
 
     def result(self):
-        self.note.phonemes = self.phon.GetValue().split()
+        self.note.phonemes = phonology.clean(self.phon.GetValue().split())[0]
         self.note.pitch = self.value_pitch()
         try:
             self.note.beats = max(0.05, float(self.beats.GetValue()))

@@ -79,6 +79,8 @@ def load():
         lib.sam_tts_pronounce.restype = C.c_int
         lib.sam_tts_pronounce.argtypes = [C.c_void_p, C.c_char_p, C.c_char_p,
                                           C.c_size_t]
+        lib.sam_tts_phonemes.restype = C.c_int
+        lib.sam_tts_phonemes.argtypes = [C.c_int, C.c_char_p, C.c_size_t]
         lib.sam_tts_sing_notes.restype = C.c_int
         lib.sam_tts_sing_notes.argtypes = [
             C.c_void_p, C.POINTER(Note), C.c_int, C.POINTER(SingOpts),
@@ -108,6 +110,15 @@ def describe():
     if available():
         return 'libsam (Microsoft Sam, Mike and Mary), %s' % _where
     return 'libsam: %s' % REASON
+
+
+def phonemes(vowels=False):
+    """The phonemes a note can be sung with, as the engine lists them -- or,
+    with `vowels`, the vowels among them. Needs no voice."""
+    buf = C.create_string_buffer(1024)
+    if load().sam_tts_phonemes(1 if vowels else 0, buf, len(buf)) < 0:
+        raise OSError('the engine would not list its phonemes')
+    return tuple(buf.value.decode('ascii').split())
 
 
 def _fs(path):

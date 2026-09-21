@@ -1,9 +1,10 @@
 """Sam's side of things: the phonemes, the song file, finding the voices, and
 singing.
 
-Everything down to EngineTests runs anywhere. EngineTests sings for real, so
-it needs the engine library built (python tools/build_engine.py) and
-Microsoft's voice files, and it skips itself on a machine without them.
+The phonemes are the engine's own, so the tests that need them need the
+engine library built (python tools/build_engine.py), and skip themselves
+without it. EngineTests sings for real, so it also needs Microsoft's voice
+files. Everything else runs anywhere.
 """
 import json
 import os
@@ -14,8 +15,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import project
-from whistler import paths, phonology, song
+from app import project, vocalwriter
+from whistler import libsam, paths, phonology, song
 
 #: VocalWriter's own phoneme table, all fifty-seven, and the one name its
 #: palette spells differently
@@ -23,13 +24,36 @@ VOCALWRITER = ('IY IH EH AE AA UX AO UH AX ER EY AY OY AW OW UW YU IR XR AR OR '
                'UR IX % RX LX EL EN w y r l h m n NG f v TH DH s z SH ZH p b t '
                'd k g CH JH TX Q QX DD O OH').split()
 
+HAS_ENGINE = libsam.available()
 
-class PhonologyTests(unittest.TestCase):
+
+class SyllableTests(unittest.TestCase):
     def test_a_dictionary_word_divides_where_the_dictionary_says(self):
         self.assertEqual(phonology.syllabify('d ey 1 - z iy'.split()),
                          [['d', 'ey', '1'], ['z', 'iy']])
         self.assertEqual(phonology.syllabify('b ay 1 - s ih 2 k - ax l'.split()),
                          [['b', 'ay', '1'], ['s', 'ih', '2', 'k'], ['ax', 'l']])
+
+    def test_regroup_keeps_syllables_whole(self):
+        word = 'b ay 1 - s ih 2 k - ax l'.split()
+        self.assertEqual(phonology.regroup(word, 2),
+                         [['b', 'ay', '1'], ['s', 'ih', '2', 'k', 'ax', 'l']])
+        self.assertEqual(len(phonology.regroup(word, 9)), 3)
+
+
+@unittest.skipUnless(HAS_ENGINE, 'needs the engine library')
+class EnginePhonemeTests(unittest.TestCase):
+    def test_the_phonemes_are_the_ones_the_engine_lists(self):
+        self.assertEqual(phonology.all_phonemes(), libsam.phonemes())
+        self.assertEqual(len(phonology.all_phonemes()), 40)
+        self.assertEqual(len(phonology.vowels()), 16)
+        self.assertTrue(phonology.vowels() <= set(phonology.all_phonemes()))
+        # the picker offers exactly those, each with a word, and a rest
+        from whistler.engine import Engine
+        rows = Engine().palette()
+        self.assertEqual([r[0] for r in rows],
+                         list(phonology.all_phonemes()) + [phonology.REST])
+        self.assertTrue(all(example for _p, example in rows))
 
     def test_without_divisions_the_next_syllable_takes_what_it_can(self):
         # "bicycle": the s opens "cy"; "twinkle": ng cannot open a syllable
@@ -41,36 +65,50 @@ class PhonologyTests(unittest.TestCase):
         self.assertEqual(phonology.syllabify(['s', 't', 'aa', 'r']),
                          [['s', 't', 'aa', 'r']])
 
-    def test_regroup_keeps_syllables_whole(self):
-        word = 'b ay 1 - s ih 2 k - ax l'.split()
-        self.assertEqual(phonology.regroup(word, 2),
-                         [['b', 'ay', '1'], ['s', 'ih', '2', 'k', 'ax', 'l']])
-        self.assertEqual(len(phonology.regroup(word, 9)), 3)
+    def test_a_note_keeps_only_the_engine_s_phonemes(self):
+        # the engine's own in any case, a stress mark after its vowel, a rest,
+        # and a division that means nothing inside one note
+        self.assertEqual(phonology.clean('d EY 1 - Z iy'.split()),
+                         (['d', 'ey', '1', 'z', 'iy'], []))
+        self.assertEqual(phonology.clean(['%']), (['%'], []))
+        # VocalWriter's phonemes are not the engine's: left out, and handed
+        # back to be reported, as is a stress mark with no vowel before it
+        self.assertEqual(phonology.clean(['b', 'AR']), (['b'], ['AR']))
+        self.assertEqual(phonology.clean(['1', 'g', 'UX', 'v', 'xyz']),
+                         (['g', 'v'], ['1', 'UX', 'xyz']))
+        # and the engine's own come through untouched
+        word = 'b ay 1 s ih 2 k ax l'.split()
+        self.assertEqual(phonology.clean(word), (word, []))
 
-    def test_every_vocalwriter_phoneme_becomes_sam_s(self):
+    def test_what_the_engine_is_given(self):
+        self.assertEqual(phonology.singable(['D', 'EY', '1', 'zz', 'UX', '%']),
+                         ['d', 'ey', '1'])
+        self.assertEqual(phonology.singable(['1', 'aa']), ['aa'])
+
+
+class VocalWriterImportTests(unittest.TestCase):
+    """VocalWriter's phonemes, which only the importers ever see."""
+
+    def test_every_vocalwriter_phoneme_has_a_translation(self):
         for sym in VOCALWRITER:
-            got = phonology.from_vocalwriter([sym])
-            self.assertTrue(got, sym)
-            for p in got:
-                self.assertTrue(p in phonology.PHONE_SET or p == phonology.REST,
-                                '%s became %r' % (sym, got))
-        self.assertEqual(phonology.unknown_vocalwriter(VOCALWRITER), [])
+            self.assertTrue(vocalwriter.to_sam([sym]), sym)
+        self.assertEqual(vocalwriter.unknown(VOCALWRITER), [])
 
     def test_the_ones_that_needed_thinking_about(self):
         cases = {'UX': ['ah'], 'OH': ['ao'], 'AR': ['aa', 'r'],
                  'EN': ['ax', 'n'], 'YU': ['y', 'uw'], 'DD': ['t'],
                  'IX': ['ax'], 'EY': ['ey'], 'CH': ['ch'], 'y': ['y']}
         for sym, want in cases.items():
-            self.assertEqual(phonology.from_vocalwriter([sym]), want, sym)
-        self.assertEqual(phonology.from_vocalwriter(['g', 'I', 'v']), ['g', 'v'])
-        self.assertEqual(phonology.unknown_vocalwriter(['g', 'I', 'v']), ['I'])
+            self.assertEqual(vocalwriter.to_sam([sym]), want, sym)
+        self.assertEqual(vocalwriter.to_sam(['g', 'I', 'v']), ['g', 'v'])
+        self.assertEqual(vocalwriter.unknown(['g', 'I', 'v']), ['I'])
 
-    def test_what_the_engine_is_given(self):
-        # Sam's own, lower-cased; VocalWriter's said in Sam's; nonsense and
-        # silence left out; a stress mark kept after its vowel
-        self.assertEqual(phonology.singable(['D', 'EY', '1', 'zz', 'UX', '%']),
-                         ['d', 'ey', '1', 'ah'])
-        self.assertEqual(phonology.singable(['1', 'aa']), ['aa'])
+    @unittest.skipUnless(HAS_ENGINE, 'needs the engine library')
+    def test_every_translation_is_one_of_the_engine_s_phonemes(self):
+        engine = set(phonology.all_phonemes()) | {phonology.REST}
+        for sym in VOCALWRITER:
+            for p in vocalwriter.to_sam([sym]):
+                self.assertIn(p, engine, '%s became %s' % (sym, p))
 
 
 class SongSettingsTests(unittest.TestCase):

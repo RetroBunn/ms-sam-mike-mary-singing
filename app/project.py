@@ -16,6 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app import vocalwriter                                  # noqa: E402
 from whistler import phonology                               # noqa: E402
 from whistler.song import (DEFAULT_SINGER, VOICE_DEFAULTS,   # noqa: E402
                            clean_reverb, clean_voice)
@@ -435,7 +436,7 @@ def import_vws(path):
     The notes, their lengths, words and bends, the tracks with their names,
     volume, pan, mute and solo, and the tempo, signature, consonant length and
     reverb all come across as they were. Each phoneme is said in Sam's
-    (`phonology.from_vocalwriter`). What cannot come across is anything about
+    (`app.vocalwriter`). What cannot come across is anything about
     VocalWriter's own voices: its bank of 87 and its voice controls (colour,
     chorus, breath and the rest) belong to a different synthesiser, so every
     part is sung by Sam with Sam's own settings until it is given others.
@@ -458,8 +459,8 @@ def import_vws(path):
         for e in part.get('notes') or []:
             e = dict(e)
             symbols = [str(s) for s in e.get('phonemes') or []]
-            unknown.update(phonology.unknown_vocalwriter(symbols))
-            e['phonemes'] = phonology.from_vocalwriter(symbols) or [REST]
+            unknown.update(vocalwriter.unknown(symbols))
+            e['phonemes'] = vocalwriter.to_sam(symbols) or [REST]
             notes.append(e)
         part['notes'] = notes
         part['singer'] = DEFAULT_SINGER
@@ -738,7 +739,7 @@ def from_midi(path, track_name=None, rest_beats=None, grid=None):
             at = start
         word = (n.text or '').strip()
         if n.phonemes:
-            ph = (phonology.from_vocalwriter(split_phonemes(n.phonemes))
+            ph = (vocalwriter.to_sam(split_phonemes(n.phonemes))
                   or [DEFAULT_PHONEME])
         elif word:
             ph = []                      # the lookup will fill it in

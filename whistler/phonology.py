@@ -1,106 +1,105 @@
 #!/usr/bin/env python3
-"""Sam's phonemes: which are vowels, where syllables divide, and VocalWriter's
-phonemes said in Sam's.
+"""Sam's phonemes: which there are and which are vowels, both as the engine
+lists them, and where syllables divide.
 
-The engine speaks the SAPI 5 American English phone set: forty sounds written
-in lower case, `aa` as in father to `zh` as in pleasure, with `1` or `2` after
-a vowel that carries primary or secondary stress and `-` between syllables.
-The dictionary gives words in exactly that form, so a word looked up comes
-back already divided: "daisy" is `d ey 1 - z iy`.
+The phonemes are the engine's own -- asked of it once (`libsam.phonemes`),
+never a list kept here -- so the program uses exactly what the engine
+provides: the SAPI 5 American English set, forty sounds in lower case, `aa`
+as in father to `zh` as in pleasure. A vowel may have `1` or `2` after it for
+primary or secondary stress, and `-` divides syllables. The dictionary gives
+words in that same form: "daisy" is `d ey 1 - z iy`.
+
+Nothing here knows VocalWriter's phonemes. Those are said in Sam's only when
+a VocalWriter Studio project or a MIDI file VocalWriter exported is brought
+in; see app/vocalwriter.py.
 """
+import os
+import sys
 
-PHONES = ('aa', 'ae', 'ah', 'ao', 'aw', 'ax', 'ay', 'b', 'ch', 'd', 'dh', 'eh',
-          'er', 'ey', 'f', 'g', 'h', 'ih', 'iy', 'jh', 'k', 'l', 'm', 'n', 'ng',
-          'ow', 'oy', 'p', 'r', 's', 'sh', 't', 'th', 'uh', 'uw', 'v', 'w', 'y',
-          'z', 'zh')
-PHONE_SET = frozenset(PHONES)
-VOWELS = frozenset(('aa', 'ae', 'ah', 'ao', 'aw', 'ax', 'ay', 'eh', 'er', 'ey',
-                    'ih', 'iy', 'ow', 'oy', 'uh', 'uw'))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from whistler import libsam                                  # noqa: E402
+
 STRESS = ('1', '2')
 SYLLABLE = '-'
 
 #: The phoneme that is silence. A note holding nothing else is a rest.
 REST = '%'
 
-#: A word for each, from SAPI's own table of the phone set; the capitals are
-#: the sound.
+#: A word each phoneme is heard in, for the picker -- SAPI's own examples.
+#: The phonemes come from the engine; these only describe them, and one the
+#: engine lists that is not here is offered without a word, not left out.
 EXAMPLES = {
-    'aa': 'fAther', 'ae': 'cAt', 'ah': 'cUt', 'ao': 'dOg', 'aw': 'fOUl',
-    'ax': 'Ago', 'ay': 'bIte', 'b': 'Big', 'ch': 'CHin', 'd': 'Dig',
-    'dh': 'THen', 'eh': 'pEt', 'er': 'fUR', 'ey': 'Ate', 'f': 'Fork',
-    'g': 'Gut', 'h': 'Help', 'ih': 'fIll', 'iy': 'fEEl', 'jh': 'Joy',
-    'k': 'Cut', 'l': 'Lid', 'm': 'Mat', 'n': 'No', 'ng': 'siNG', 'ow': 'gO',
-    'oy': 'tOY', 'p': 'Put', 'r': 'Red', 's': 'Sit', 'sh': 'SHe', 't': 'Talk',
-    'th': 'THin', 'uh': 'bOOk', 'uw': 'tOO', 'v': 'Vat', 'w': 'With',
-    'y': 'Yard', 'z': 'Zap', 'zh': 'pleaSure',
+    'aa': 'father', 'ae': 'cat', 'ah': 'cut', 'ao': 'dog', 'aw': 'foul',
+    'ax': 'ago', 'ay': 'bite', 'b': 'big', 'ch': 'chin', 'd': 'dig',
+    'dh': 'then', 'eh': 'pet', 'er': 'fur', 'ey': 'ate', 'f': 'fork',
+    'g': 'gut', 'h': 'help', 'ih': 'fill', 'iy': 'feel', 'jh': 'joy',
+    'k': 'cut', 'l': 'lid', 'm': 'mat', 'n': 'no', 'ng': 'sing', 'ow': 'go',
+    'oy': 'toy', 'p': 'put', 'r': 'red', 's': 'sit', 'sh': 'she',
+    't': 'talk', 'th': 'thin', 'uh': 'book', 'uw': 'too', 'v': 'vat',
+    'w': 'with', 'y': 'yard', 'z': 'zap', 'zh': 'pleasure',
 }
 
-#: VocalWriter's fifty-seven phonemes in Sam's terms, for bringing in a
-#: VocalWriter Studio project or a MIDI file VocalWriter exported. Each was
-#: matched by the example word VocalWriter itself gives it: UX is "bUd", so it
-#: is Sam's `ah`; OH is the vowel of "bOy" on its own, `ao`. The r-coloured
-#: vowels and the syllabic consonants are two of Sam's phonemes: AR ("bAR") is
-#: `aa r`, EN ("buttON") is `ax n`. Sam has no flap and no glottal stop, and
-#: says "better" with a `t` itself, so the flaps and stops of beTTer, iT and
-#: greaTer are `t`.
-FROM_VOCALWRITER = {
-    'AE': ['ae'], 'AA': ['aa'], 'AX': ['ax'], 'AO': ['ao'], 'EH': ['eh'],
-    'IH': ['ih'], 'UX': ['ah'], 'EY': ['ey'], 'AY': ['ay'], 'IY': ['iy'],
-    'UW': ['uw'], 'UH': ['uh'], 'OW': ['ow'], 'AW': ['aw'], 'OY': ['oy'],
-    'YU': ['y', 'uw'], 'ER': ['er'], 'AR': ['aa', 'r'], 'XR': ['eh', 'r'],
-    'IR': ['ih', 'r'], 'OR': ['ao', 'r'], 'UR': ['uh', 'r'], 'OH': ['ao'],
-    'O': ['ao'], 'LX': ['l'], 'EL': ['ax', 'l'], 'EN': ['ax', 'n'],
-    'IX': ['ax'], 'RX': ['er'], 'DX': ['t'], 'DD': ['t'], 'TX': ['t'],
-    'Q': ['t'], 'QX': ['t'], 'CH': ['ch'], 'DH': ['dh'], 'JH': ['jh'],
-    'NG': ['ng'], 'SH': ['sh'], 'TH': ['th'], 'ZH': ['zh'], REST: [REST],
-}
-#: the single letters are the same sound in both
-for _c in 'bdfghklmnprstvwyz':
-    FROM_VOCALWRITER[_c] = [_c]
+_engine = None
 
 
-def from_vocalwriter(phonemes):
-    """A VocalWriter note's phonemes as Sam's. Anything neither program knows
-    is left out rather than guessed at; `unknown_vocalwriter` names it."""
-    out = []
-    for sym in phonemes or ():
-        mapped = FROM_VOCALWRITER.get(sym) or FROM_VOCALWRITER.get(sym.upper())
-        if mapped:
-            out.extend(mapped)
-        elif sym.lower() in PHONE_SET:
-            out.append(sym.lower())
-    return out
+def _asked():
+    """(phonemes, vowels) as the engine lists them, asked for once."""
+    global _engine
+    if _engine is None:
+        _engine = (libsam.phonemes(), frozenset(libsam.phonemes(vowels=True)))
+    return _engine
 
 
-def unknown_vocalwriter(phonemes):
-    """The symbols `from_vocalwriter` could not place."""
-    return [s for s in phonemes or ()
-            if not (FROM_VOCALWRITER.get(s) or FROM_VOCALWRITER.get(s.upper())
-                    or s.lower() in PHONE_SET)]
+def all_phonemes():
+    """Every phoneme a note can be sung with, in the engine's own order."""
+    return _asked()[0]
 
 
-def singable(phonemes):
-    """A note's phonemes as the engine takes them: Sam's, in lower case, with
-    any of VocalWriter's said in Sam's and anything else left out -- so a
-    symbol typed wrong cannot stop a whole song rendering. A stress mark stays
-    where it is, after its vowel; silence goes, since a rest is a note."""
-    out = []
-    for sym in phonemes or ():
-        if sym in STRESS or sym == SYLLABLE:
-            if out:
-                out.append(sym)
-            continue
-        low = sym.lower()
-        if low in PHONE_SET:
-            out.append(low)
-        else:
-            out.extend(p for p in from_vocalwriter([sym]) if p != REST)
-    return out
+def vowels():
+    """The engine's vowels: the sounds a note's length is spent on."""
+    return _asked()[1]
 
 
 def is_nucleus(sym):
-    """Whether a phoneme is a vowel: what a note's length is spent on."""
-    return sym in VOWELS
+    """Whether a phoneme is a vowel."""
+    return sym in vowels()
+
+
+def clean(phonemes):
+    """Phonemes as someone typed them, kept to the engine's: each of its own
+    in the lower case it spells them in, a stress mark after the vowel it
+    belongs to, and the rest sign for a rest. A syllable division means
+    nothing inside one note, so it goes quietly. Anything else -- a
+    VocalWriter phoneme such as UX or AR included -- is not the engine's.
+
+    Returns (phonemes, what was left out), so that a note only ever holds what
+    the engine has, and whoever typed it can be told what went.
+    """
+    known, vowel = set(all_phonemes()), vowels()
+    out, left = [], []
+    for sym in phonemes or ():
+        if sym == SYLLABLE:
+            continue
+        if sym == REST:
+            out.append(REST)
+        elif sym in STRESS:
+            if out and out[-1] in vowel:
+                out.append(sym)
+            else:
+                left.append(sym)
+        elif sym.lower() in known:
+            out.append(sym.lower())
+        else:
+            left.append(sym)
+    return out, left
+
+
+def singable(phonemes):
+    """A note's phonemes as the engine takes them: `clean`'s, so a symbol
+    typed wrong cannot stop a whole song rendering, and without the rest sign,
+    since a rest is a note of its own."""
+    return [p for p in clean(phonemes)[0] if p != REST]
 
 
 #: Consonants that can follow another one at the start of a syllable: the

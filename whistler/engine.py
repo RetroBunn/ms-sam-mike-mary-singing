@@ -324,8 +324,9 @@ class Engine(object):
         return out
 
     def palette(self):
-        """Every phoneme, with a word it is heard in."""
-        return ([[p, phonology.EXAMPLES[p]] for p in phonology.PHONES]
+        """Every phoneme the engine lists, with a word it is heard in."""
+        return ([[p, phonology.EXAMPLES.get(p, '')]
+                 for p in phonology.all_phonemes()]
                 + [[phonology.REST, 'silence, a rest']])
 
     def preview(self, phoneme, pitch=60, singer=None, beats=0.45, out=None):

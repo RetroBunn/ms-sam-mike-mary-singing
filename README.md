@@ -120,11 +120,13 @@ starting a new song clears history; saving preserves it. On macOS, use
 Command+Z and Command+Shift+Z; Hear Note is **Option+H**, leaving Command+H to
 hide the app, and play from the start is **Command+P**.
 
-The picker inside the note editor offers all forty of Sam's phonemes, each with
-a word it is heard in -- `aa` as in fAther to `zh` as in pleaSure. A note's
-phonemes can also be typed, separated by spaces, with `1` or `2` after a vowel
-to stress it; a symbol that is not one of Sam's is left out rather than
-stopping the song.
+The phonemes are the engine's own: the program asks the engine for its list
+rather than keeping one, and the picker inside the note editor offers all forty
+of them, each with a word it is heard in -- `aa` as in father to `zh` as in
+pleasure. A note's phonemes can also be typed, separated by spaces, with `1` or
+`2` after a vowel to stress it. Pressing OK keeps them to the engine's: anything
+else, VocalWriter's `UX` or `AR` included, is left out, and Messages says what
+went.
 
 What belongs to the whole song -- the tempo, the time signature, how long the
 consonants are, the reverb, and the voice controls -- is set once in the song
@@ -181,7 +183,9 @@ and iT are `t`. The notes, words, bends, tempo, signature, consonant length and
 reverb come across as they were. VocalWriter's voices and voice controls do
 not -- they belong to a different synthesiser -- so every part is sung by Sam
 until it is given another voice, and the import says so, along with any symbol
-it could not place. Saving then writes a `.wst` beside the original.
+it could not place. Saving then writes a `.wst` beside the original. That
+translation, in `app/vocalwriter.py`, is the only place VocalWriter's phonemes
+exist in the program: once imported, a song holds only the engine's.
 
 ### From the command line
 
@@ -235,6 +239,8 @@ one call, `sam_tts_sing_notes` in `engine/src/sam_tts.h`:
   last one ran over or under. That is what keeps a long phrase on the beat.
 - Pitch bends, portamento and vibrato follow the note; the effects are the
   SAPI 4 voice modes.
+- The engine lists its own phonemes and which are vowels (`sam_tts_phonemes`),
+  and that list is the program's: nothing is kept on this side to drift from it.
 
 Everything is sung at the voices' own rate, 22,050 Hz, and that is what the
 exported files are. Rendering is quick: eleven seconds of Mary with reverb take
@@ -248,10 +254,11 @@ turned down, rather than clipped, when parts add up past full scale.
 app/studio.py        the window: tracks, notes, phonemes, play
 app/cli.py           the same program with no window: a song in, a WAV out
 app/project.py       songs, Import VWS and Import MIDI
+app/vocalwriter.py   VocalWriter's phonemes in Sam's, for the importers only
 app/engine.py        the engine on a worker thread, answering in callbacks
 whistler/engine.py   phrases in, a mixed song out, with the render cache
 whistler/libsam.py   the engine library, through ctypes
-whistler/phonology.py Sam's phonemes, syllables, and VocalWriter's in Sam's
+whistler/phonology.py the engine's phonemes and vowels, and syllables
 whistler/paths.py    where the engine and the voices are
 ```
 
